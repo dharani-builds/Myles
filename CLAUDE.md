@@ -43,3 +43,18 @@ Northern Lights/
 
 - Swiggy Builders: builders@swiggy.in
 - Docs: https://mcp.swiggy.com/builders/docs/
+
+## Progress log
+
+### Phase 0 — MCP connection proof (done)
+- Connected Swiggy Food + Instamart MCPs to Claude Desktop via `mcp-remote`
+- OAuth completed against real Swiggy account
+- Verified live data flow:
+  - `get_orders` (Instamart) → returned real past orders with full details
+  - `get_addresses` (Food) → returned all 9 saved addresses
+  - `track_food_order` → returns active orders (currently none)
+- Conclusion: data foundation works. Ready to build the actual app.
+
+### Phase 1 — Next
+- Design V1 menu bar UI (what to show, what to hide)
+- Bootstrap Xcode project + Swift OAuth flow
