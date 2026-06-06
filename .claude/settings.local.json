@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:mcp.swiggy.com)",
+      "Bash(git -C \"/Users/dharanitharan.r/Projects/Northern Lights\" init)",
+      "Bash(git -C \"/Users/dharanitharan.r/Projects/Northern Lights\" status)",
+      "Bash(git -C \"/Users/dharanitharan.r/Projects/Northern Lights\" diff)",
+      "Bash(git -C \"/Users/dharanitharan.r/Projects/Northern Lights\" add CLAUDE.md .claude/)",
+      "Bash(git -C '/Users/dharanitharan.r/Projects/Northern Lights' commit -m ' *)"
+    ]
+  }
+}
