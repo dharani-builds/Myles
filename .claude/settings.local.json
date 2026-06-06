@@ -6,7 +6,12 @@
       "Bash(git -C \"/Users/dharanitharan.r/Projects/Northern Lights\" status)",
       "Bash(git -C \"/Users/dharanitharan.r/Projects/Northern Lights\" diff)",
       "Bash(git -C \"/Users/dharanitharan.r/Projects/Northern Lights\" add CLAUDE.md .claude/)",
-      "Bash(git -C '/Users/dharanitharan.r/Projects/Northern Lights' commit -m ' *)"
+      "Bash(git -C '/Users/dharanitharan.r/Projects/Northern Lights' commit -m ' *)",
+      "mcp__swiggy-instamart__get_orders",
+      "mcp__swiggy-food__track_food_order",
+      "mcp__swiggy-food__get_addresses",
+      "Bash(git -C \"/Users/dharanitharan.r/Projects/Northern Lights\" add CLAUDE.md)",
+      "Bash(git -C \"/Users/dharanitharan.r/Projects/Northern Lights\" add .claude/settings.local.json)"
     ]
   }
 }
