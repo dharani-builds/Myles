@@ -44,6 +44,22 @@ Northern Lights/
 - Swiggy Builders: builders@swiggy.in
 - Docs: https://mcp.swiggy.com/builders/docs/
 
+## Roadmap
+
+Macro plan. Each phase gets a detailed checklist when it starts — not before.
+
+| Phase | Scope | Status |
+|---|---|---|
+| 0 | Swiggy MCP connection proof (Claude Desktop + OAuth + live tool calls) | ✅ Done |
+| 1 | Design system foundation in Figma — Swiggy color palette (neutrals + brand) via Mobbin MCP + Instamart screenshots | Next |
+| 2 | UI design + iteration in Figma until locked | — |
+| 3 | macOS-native polish review on the locked design | — |
+| 4 | Build the app (Swift + SwiftUI + MenuBarExtra) — also a learning phase | — |
+| 5 | Local daily-use testing until reliable | — |
+| 6 | Record demo, pitch to Swiggy Builders for production access | — |
+
+Operating principle: **phase-by-phase zoom-in.** No pre-planning of phase internals.
+
 ## Progress log
 
 ### Phase 0 — MCP connection proof (done)
@@ -53,8 +69,4 @@ Northern Lights/
   - `get_orders` (Instamart) → returned real past orders with full details
   - `get_addresses` (Food) → returned all 9 saved addresses
   - `track_food_order` → returns active orders (currently none)
-- Conclusion: data foundation works. Ready to build the actual app.
-
-### Phase 1 — Next
-- Design V1 menu bar UI (what to show, what to hide)
-- Bootstrap Xcode project + Swift OAuth flow
+- Conclusion: data foundation works. Ready to design.
