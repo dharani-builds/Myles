@@ -1,0 +1,3 @@
+{"pollAt":"2026-06-18T03:15:00Z","poll":1,"orderId":null,"status":null,"historyStatus":null,"currentStatus":null,"statusMessage":null,"isActive":null,"eta":null,"createdAt":null,"updatedAt":null,"empty":true,"raw":{}}
+{"pollAt":"2026-06-18T03:16:00Z","poll":2,"orderId":null,"status":null,"historyStatus":null,"currentStatus":null,"statusMessage":null,"isActive":null,"eta":null,"createdAt":null,"updatedAt":null,"empty":true,"raw":{}}
+{"pollAt":"2026-06-18T03:17:30Z","poll":3,"orderId":null,"status":null,"historyStatus":null,"currentStatus":null,"statusMessage":null,"isActive":null,"eta":null,"createdAt":null,"updatedAt":null,"empty":true,"note":"User confirmed order placed via Swiggy app; both track_food_order and get_food_orders still return empty","raw":{}}
