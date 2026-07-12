@@ -29,7 +29,7 @@ struct OrderRowView: View {
                     .foregroundStyle(Color.textTertiary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(height: 13) // 1.2× line height ratio (Figma spec was 10pt/12pt)
+                    .frame(height: 14) // 1.2× line height ratio (Figma spec was 10pt/12pt)
                 Text(order.status)
                     .font(.system(size: 15, weight: .bold))
                     .kerning(-0.15)
