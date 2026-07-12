@@ -47,7 +47,10 @@
       "Bash(python3 -m json.tool)",
       "Bash(security find-generic-password *)",
       "Bash(python3 -c \"import sys, json; d=json.loads\\(sys.stdin.read\\(\\)\\); c=d['result']['content'][0]; print\\('keys in content:', list\\(c.keys\\(\\)\\)\\); print\\('first 500 chars of text:'\\); print\\(c.get\\('text', ''\\)[:500]\\)\")",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(git -C \"/Users/dharanitharan.r/Projects/Northern Lights\" log --oneline -8)",
+      "Bash(git fetch *)",
+      "Bash(git push *)"
     ]
   }
 }
