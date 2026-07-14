@@ -51,4 +51,18 @@ final class AuthState {
         oauth.signOut()
         status = .idle
     }
+
+    // MARK: - Preview helpers
+    //
+    // SwiftUI Previews can't run the real OAuth flow, so we expose a factory
+    // that returns an AuthState already in the `.authenticated` state. This
+    // lets us preview downstream orders screens (loading / empty / loaded /
+    // error) without pretending to sign in.
+
+    /// A pre-authenticated instance for Xcode Previews. Do not use in the app.
+    static var previewAuthenticated: AuthState {
+        let s = AuthState()
+        s.status = .authenticated
+        return s
+    }
 }

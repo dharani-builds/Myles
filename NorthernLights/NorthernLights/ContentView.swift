@@ -7,32 +7,49 @@
 
 import SwiftUI
 
-/// Root view for the menu bar popover. Branches on auth state.
+/// Root view for the menu bar popover.
 ///
-/// TEMPORARY note: the `.authenticated` case still uses hardcoded sample
-/// orders. Next step is the data layer — polling Swiggy MCP endpoints
-/// with the token we just acquired via `SwiggyOAuth`.
+/// Two-level branching:
+///   1. `AuthState` — is the user signed in?
+///   2. `OrdersState` — if signed in, what's the order fetch showing?
+///
+/// Each branch is a tiny view below, so we can iterate on any single state
+/// (empty, loading, one order, many orders, error) from Xcode Previews
+/// without needing a live Swiggy feed.
 struct ContentView: View {
     @Environment(AuthState.self) private var authState
+    @Environment(OrdersState.self) private var ordersState
 
     var body: some View {
         switch authState.status {
         case .idle:
             ConnectView()
         case .authorizing:
-            LoadingView()
+            AuthLoadingView()
         case .authenticated:
-            OrderCardView(orders: sampleOrders)
+            ordersScreen
         case .error(let message):
-            ErrorView(message: message)
+            AuthErrorView(message: message)
+        }
+    }
+
+    /// Which orders-screen to show, once we know the user is signed in.
+    @ViewBuilder
+    private var ordersScreen: some View {
+        switch ordersState.status {
+        case .loading:
+            OrdersLoadingView()
+        case .empty:
+            EmptyOrdersView()
+        case .loaded(let orders):
+            OrderCardView(orders: orders)
+        case .error(let message):
+            OrdersErrorView(message: message)
         }
     }
 }
 
 // MARK: - Connect (not signed in)
-//
-// Functional-but-not-designed placeholder. Uses the design tokens so it feels
-// on-brand, but the exact layout will be re-done in the Phase 4 polish pass.
 
 private struct ConnectView: View {
     @Environment(AuthState.self) private var authState
@@ -67,9 +84,9 @@ private struct ConnectView: View {
     }
 }
 
-// MARK: - Loading (auth in progress)
+// MARK: - Auth loading / auth error
 
-private struct LoadingView: View {
+private struct AuthLoadingView: View {
     var body: some View {
         VStack(spacing: 12) {
             ProgressView()
@@ -84,9 +101,7 @@ private struct LoadingView: View {
     }
 }
 
-// MARK: - Error (last attempt failed)
-
-private struct ErrorView: View {
+private struct AuthErrorView: View {
     let message: String
     @Environment(AuthState.self) private var authState
 
@@ -121,48 +136,99 @@ private struct ErrorView: View {
     }
 }
 
-// MARK: - Sample data (remove once real data is wired)
+// MARK: - Orders: loading / empty / error
+//
+// Functional placeholders. Layout + copy will be re-designed in the Phase 4
+// polish pass — right now the goal is just to have every state renderable
+// with fixtures so nothing breaks the layout during dev.
 
-private let sampleOrders: [Order] = [
-    // Short status, short-ish context
-    Order(
-        id: "sample-1",
-        platform: .food,
-        context: "Truffles • Grilled Fish in Lemon Butter Sauce",
-        status: "Out for delivery",
-        eta: 10,
-        progress: .inTransit
-    ),
-    // Short status, long context (should truncate with ellipsis)
-    Order(
-        id: "sample-2",
-        platform: .instamart,
-        context: "Modern 100% Whole Wheat Bread • Yogabar Dark Chocolate Oats • Robusta Bananas",
-        status: "Order Packed",
-        eta: 5,
-        progress: .packed
-    ),
-    // LONG status (should wrap to 2 lines)
-    Order(
-        id: "sample-3",
-        platform: .food,
-        context: "Theobroma • Chicken Tikka Sandwich",
-        status: "Delivery partner is at the restaurant",
-        eta: 15,
-        progress: .preparing
-    ),
-    // LONG status (should wrap to 2 lines) + short ETA
-    Order(
-        id: "sample-4",
-        platform: .instamart,
-        context: "Khadi Natural Coconut Milk & Honey Soap",
-        status: "Your delivery partner is 2 minutes away",
-        eta: 2,
-        progress: .nearby
-    )
-]
+private struct OrdersLoadingView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .scaleEffect(0.8)
+            Text("Checking for orders…")
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(Color.textTertiary)
+        }
+        .padding(32)
+        .frame(width: 350)
+        .background(Color.surfaceBackground)
+    }
+}
 
-#Preview {
+private struct EmptyOrdersView: View {
+    var body: some View {
+        VStack(spacing: 8) {
+            Text("No active orders")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color.textPrimary)
+            Text("You'll see live updates here when you place an order on Swiggy.")
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(Color.textTertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(24)
+        .frame(width: 350)
+        .background(Color.surfaceBackground)
+    }
+}
+
+private struct OrdersErrorView: View {
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Text("Couldn't fetch orders")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color.textPrimary)
+            Text(message)
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(Color.textTertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(24)
+        .frame(width: 350)
+        .background(Color.surfaceBackground)
+    }
+}
+
+// MARK: - Previews (one per state, all fixture-driven)
+
+#Preview("Auth · signed out") {
     ContentView()
         .environment(AuthState())
+        .environment(OrdersState())
+}
+
+#Preview("Orders · loading") {
+    ContentView()
+        .environment(AuthState.previewAuthenticated)
+        .environment(OrdersState(initial: .loading))
+}
+
+#Preview("Orders · empty") {
+    ContentView()
+        .environment(AuthState.previewAuthenticated)
+        .environment(OrdersState(initial: .empty))
+}
+
+#Preview("Orders · one order") {
+    ContentView()
+        .environment(AuthState.previewAuthenticated)
+        .environment(OrdersState(initial: .loaded(Fixtures.singleOrder)))
+}
+
+#Preview("Orders · many orders") {
+    ContentView()
+        .environment(AuthState.previewAuthenticated)
+        .environment(OrdersState(initial: .loaded(Fixtures.mixedOrders)))
+}
+
+#Preview("Orders · error") {
+    ContentView()
+        .environment(AuthState.previewAuthenticated)
+        .environment(OrdersState(initial: .error("Swiggy is taking longer than usual to respond.")))
 }

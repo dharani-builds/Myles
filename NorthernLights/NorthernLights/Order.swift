@@ -1,7 +1,7 @@
 import Foundation
 
 /// Which Swiggy vertical the order belongs to. Drives badge color + progress hue.
-enum OrderPlatform {
+enum OrderPlatform: Equatable {
     case food
     case instamart
 }
@@ -12,7 +12,7 @@ enum OrderPlatform {
 /// name, one line of status copy, an ETA, and a progress percentage. The
 /// mapping from Swiggy's MCP response (`orderStatus`, `currentStatus`, etc.)
 /// to this shape happens in the data layer, not here.
-struct Order: Identifiable {
+struct Order: Identifiable, Equatable {
     let id: String
     let platform: OrderPlatform
     /// Context line — restaurant/store name + primary item, joined with " • ".

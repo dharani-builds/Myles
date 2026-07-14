@@ -50,7 +50,8 @@
       "Bash(python3 -c ' *)",
       "Bash(git -C \"/Users/dharanitharan.r/Projects/Northern Lights\" log --oneline -8)",
       "Bash(git fetch *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(xcodebuild -project NorthernLights.xcodeproj -scheme NorthernLights -configuration Debug build -destination 'platform=macOS')"
     ]
   }
 }
