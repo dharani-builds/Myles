@@ -56,8 +56,17 @@ private struct ETABadge: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text(minutes.map(String.init) ?? "—")
-                .font(.system(size: 20, weight: .bold))
+            // Slot-machine reel — see RollingNumberReel below for how it works.
+            // Nil ETA (rare — usually terminal state) falls back to a static
+            // em-dash matched to the same viewport height so the badge layout
+            // doesn't jump when a value arrives.
+            if let m = minutes, m >= 0 {
+                RollingNumberReel(value: m, maxValue: 99)
+            } else {
+                Text("—")
+                    .font(.system(size: 20, weight: .bold))
+                    .frame(height: RollingNumberReel.rowHeight)
+            }
             Text("mins")
                 .font(.system(size: 12, weight: .medium))
         }
@@ -110,3 +119,48 @@ private struct ProgressBarView: View {
         .frame(height: 6)
     }
 }
+
+// MARK: - Rolling number reel (slot-machine style)
+//
+// One tall VStack containing every possible value stacked vertically, clipped
+// down to a single-row viewport. `.offset(y:)` picks which row is visible.
+// When `value` changes, SwiftUI animates the offset with a spring — the reel
+// physically scrolls, digits above and below get pulled through the viewport,
+// same feel as an iOS picker wheel or a slot-machine drum settling.
+//
+// Trade-off: this creates `maxValue + 1` Text views up front (default 100).
+// That's fine for a single badge in a menu bar — SwiftUI happily virtualizes
+// the render — but it's why the reel is NOT arbitrary-range: keep maxValue
+// sensible. Deliveries never exceed ~90min, so 99 is plenty of headroom.
+private struct RollingNumberReel: View {
+    let value: Int
+    let maxValue: Int
+
+    /// Viewport height = one row. Sized generously enough for a 20pt bold
+    /// digit — the reel below scrolls at exactly this pitch.
+    static let rowHeight: CGFloat = 24
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(0...maxValue, id: \.self) { n in
+                Text("\(n)")
+                    .font(.system(size: 20, weight: .bold))
+                    .frame(height: Self.rowHeight)
+            }
+        }
+        // Reel is [0, 1, 2, ..., maxValue] from top to bottom. To show value V,
+        // translate the reel UP by V rows so V lands at the viewport's top.
+        // When V decreases (countdown tick), the offset becomes less negative,
+        // the reel scrolls DOWN visually, the lower digit slides in from
+        // above — matching an iOS picker scrolled toward smaller values.
+        .offset(y: -CGFloat(value) * Self.rowHeight)
+        // Spring keeps the motion mechanical-feeling: a bit of overshoot then
+        // settles. `response` = how long the settle takes; `dampingFraction`
+        // = how much bounce. Tuned so a 45s poll cycle doesn't visually
+        // over-stay its welcome.
+        .animation(.spring(response: 0.65, dampingFraction: 0.75), value: value)
+        .frame(height: Self.rowHeight, alignment: .top)
+        .clipped()
+    }
+}
+
