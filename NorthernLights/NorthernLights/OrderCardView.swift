@@ -1,11 +1,14 @@
 import SwiftUI
 
-/// The popover card. Header + stacked order rows with dividers between them.
+/// The orders section of the popover: header + stacked order rows with
+/// dividers between them.
+///
+/// This intentionally does NOT provide its own background/shadow/corner-radius
+/// — those live on the shared orders-container in `ContentView` so the same
+/// card wraps every orders state (loading / empty / loaded / error) plus the
+/// footer as one cohesive surface.
 ///
 /// Matches the Figma "multiple orders" case (node 70:430):
-///   • 350pt wide, 12pt corner radius
-///   • White background, 0.5pt subtle inside border
-///   • Drop shadow: rgba(0,0,0,0.08), offset (1,2), radius 2
 ///   • Header: solid divider (`border/subtle`) below
 ///   • Between rows: dashed divider (`border/default`)
 struct OrderCardView: View {
@@ -17,10 +20,6 @@ struct OrderCardView: View {
             solidDivider
             content
         }
-        .background(Color.surfaceBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.08), radius: 2, x: 1, y: 2)
-        .frame(width: 350)
     }
 
     private var header: some View {

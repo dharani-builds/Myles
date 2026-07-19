@@ -94,14 +94,17 @@ extension Color {
     static let brandSwiggyPrimaryHover   = swiggy600
     static let brandSwiggyPrimaryPressed = swiggy700
     static let brandSwiggySurface        = swiggy50
-    static let brandSwiggyOnPrimary      = slate0
+    // Fixed white — the brand orange doesn't invert in dark mode, so the text
+    // on it shouldn't either. Using `textInverse`/`slate0` here flips to
+    // near-black in dark mode and reads as haunting on the orange fill.
+    static let brandSwiggyOnPrimary      = Color(light: "#FFFFFF", dark: "#FFFFFF")
 
     // Brand · Instamart
     static let brandInstamartPrimary        = instamart500
     static let brandInstamartPrimaryHover   = instamart600
     static let brandInstamartPrimaryPressed = instamart700
     static let brandInstamartSurface        = instamart50
-    static let brandInstamartOnPrimary      = slate0
+    static let brandInstamartOnPrimary      = Color(light: "#FFFFFF", dark: "#FFFFFF")
 
     // Status
     static let statusSuccess        = statusGreen500
@@ -114,6 +117,9 @@ extension Color {
     static let textTertiary  = slate10
     static let textDisabled  = slate9
     static let textInverse   = slate0
+    /// Inline link color (e.g. "Help me fix it" in error screens). Same in
+    /// light + dark for now; can specialise per-mode if we add more links.
+    static let textLink      = Color(light: "#0579BC", dark: "#0579BC")
 
     // Surface
     static let surfaceBackground = slate0

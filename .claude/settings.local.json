@@ -62,7 +62,23 @@
       "Bash(/bin/sleep 1)",
       "Bash(/usr/bin/open /Users/dharanitharan.r/Library/Developer/Xcode/DerivedData/NorthernLights-dyykhzidqiztnjbwjelnqtjunozh/Build/Products/Debug/NorthernLights.app)",
       "Bash(/bin/sleep 3)",
-      "Bash(/usr/bin/pgrep -x NorthernLights)"
+      "Bash(/usr/bin/pgrep -x NorthernLights)",
+      "Bash(python3 -c \"import cairosvg; print\\('cairosvg available'\\)\")",
+      "Bash(cp /tmp/icon_gen/myles_18.png '/Users/dharanitharan.r/Projects/Northern Lights/NorthernLights/NorthernLights/Assets.xcassets/MenuBarIcon.imageset/myles_18.png')",
+      "Bash(cp /tmp/icon_gen/myles_36.png '/Users/dharanitharan.r/Projects/Northern Lights/NorthernLights/NorthernLights/Assets.xcassets/MenuBarIcon.imageset/myles_36.png')",
+      "Bash(/bin/sleep 2)",
+      "Bash(brew list *)",
+      "Bash(python3 -c \"import cairosvg\")",
+      "Bash(pip3 list *)",
+      "Bash(cp /tmp/icon_gen/myles_18_v2.png '/Users/dharanitharan.r/Projects/Northern Lights/NorthernLights/NorthernLights/Assets.xcassets/MenuBarIcon.imageset/myles_18.png')",
+      "Bash(cp /tmp/icon_gen/myles_36_v2.png '/Users/dharanitharan.r/Projects/Northern Lights/NorthernLights/NorthernLights/Assets.xcassets/MenuBarIcon.imageset/myles_36.png')",
+      "Skill(fewer-permission-prompts)",
+      "Skill(fewer-permission-prompts:*)",
+      "Bash(python3)",
+      "Bash(/usr/bin/pgrep -lf NorthernLights)",
+      "Bash(/usr/bin/killall -9 NorthernLights)",
+      "Bash(/bin/kill -9 13663)",
+      "Bash(/bin/kill -9 16245)"
     ]
   }
 }

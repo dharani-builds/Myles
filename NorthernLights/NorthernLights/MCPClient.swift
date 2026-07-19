@@ -50,16 +50,52 @@ final class MCPClient {
         let suggestedPollInterval: TimeInterval?
     }
 
-    /// Fetch every active order across Food + Instamart, in parallel.
-    /// If one platform errors, the whole call throws — the poller decides
-    /// whether that's a soft or hard failure.
+    /// Fetch every active order across Food + Instamart, in parallel, with
+    /// **per-platform soft-fail**:
+    ///   • If either platform returns `unauthorized`, propagate immediately —
+    ///     token is dead, no point continuing to show partial data.
+    ///   • If exactly one platform errors (any other reason), return what the
+    ///     other returned. Partial data > no data > silent failure.
+    ///   • If both fail, throw the first non-auth error. Poller escalates.
     func fetchActiveOrders() async throws -> FetchResult {
         async let food = fetchFoodOrders()
         async let insta = fetchInstamartOrders()
-        let (foodResult, instaOrders) = try await (food, insta)
+
+        var foodOutcome: FoodFetchOutcome?
+        var instaOrders: [Order]?
+        var errors: [Error] = []
+
+        do {
+            foodOutcome = try await food
+        } catch {
+            errors.append(error)
+        }
+        do {
+            instaOrders = try await insta
+        } catch {
+            errors.append(error)
+        }
+
+        // Any 401 anywhere means the shared token is dead — force sign-out.
+        for err in errors {
+            if let mcpErr = err as? MCPError, case .unauthorized = mcpErr {
+                throw MCPError.unauthorized
+            }
+        }
+
+        // Both platforms failed (non-auth) → propagate the first error so the
+        // poller can escalate to `.error` after its own consecutive-failure threshold.
+        if foodOutcome == nil && instaOrders == nil, let first = errors.first {
+            throw first
+        }
+
+        // At least one platform succeeded — return partial data. The poller's
+        // consecutive-error counter resets on any non-throwing call, so a
+        // single-platform blip doesn't count as a "failure" toward the
+        // "Something went wrong" screen escalation.
         return FetchResult(
-            orders: foodResult.orders + instaOrders,
-            suggestedPollInterval: foodResult.minPollInterval
+            orders: (foodOutcome?.orders ?? []) + (instaOrders ?? []),
+            suggestedPollInterval: foodOutcome?.minPollInterval
         )
     }
 
