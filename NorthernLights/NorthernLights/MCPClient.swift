@@ -130,6 +130,20 @@ final class MCPClient {
         )
         let rawOrders = listResult.orders ?? []
 
+        // Capture-only: same tool with activeOnly:false gives us the full
+        // history including recently-delivered orders. Those responses may
+        // carry fields (final orderDeliveryStatus, terminal timestamps, etc.)
+        // that the active-only view drops. Result discarded — capture lands
+        // in the JSONL via callTool's built-in append.
+        let _: CaptureOnlyResult? = try? await callTool(
+            endpoint: foodEndpoint,
+            name: "get_food_orders",
+            arguments: [
+                "addressId": addressId,
+                "activeOnly": false
+            ]
+        )
+
         // For each active order, try to fetch live delivery status. Individual
         // failures are tolerated: the order still appears, just without ETA
         // (nil). We poll serially — typically 1–2 active orders, not worth
