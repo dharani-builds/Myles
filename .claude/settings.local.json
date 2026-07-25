@@ -82,7 +82,9 @@
       "Bash(rsvg-convert -w 18 -h 18 \"design-assets/myles vector.svg\" -o \"NorthernLights/NorthernLights/Assets.xcassets/MenuBarIcon.imageset/myles_18.png\")",
       "Bash(rsvg-convert -w 36 -h 36 \"design-assets/myles vector.svg\" -o \"NorthernLights/NorthernLights/Assets.xcassets/MenuBarIcon.imageset/myles_36.png\")",
       "Bash(rsvg-convert -w 256 -h 256 /private/tmp/claude-502/-Users-dharanitharan-r-Projects-Northern-Lights/178b55eb-28f3-4ed6-bfe5-52b6b49de2d0/scratchpad/app_icon_master.svg -o /private/tmp/claude-502/-Users-dharanitharan-r-Projects-Northern-Lights/178b55eb-28f3-4ed6-bfe5-52b6b49de2d0/scratchpad/app_icon_preview.png)",
-      "Bash(cd \"/Users/dharanitharan.r/Projects/Northern Lights\" && rm -f NorthernLights/NorthernLights/Assets.xcassets/AppIcon.appiconset/icon_*.png && rm -f \"design-assets/app_icon_master.svg\" && ls NorthernLights/NorthernLights/Assets.xcassets/AppIcon.appiconset/ && echo \"---\" && ls design-assets/)"
+      "Bash(cd \"/Users/dharanitharan.r/Projects/Northern Lights\" && rm -f NorthernLights/NorthernLights/Assets.xcassets/AppIcon.appiconset/icon_*.png && rm -f \"design-assets/app_icon_master.svg\" && ls NorthernLights/NorthernLights/Assets.xcassets/AppIcon.appiconset/ && echo \"---\" && ls design-assets/)",
+      "Bash(osascript -e 'tell application \"NorthernLights\" to quit')",
+      "Bash(pkill -x NorthernLights)"
     ]
   }
 }

@@ -22,11 +22,15 @@ struct Order: Identifiable, Equatable {
     let status: String
     /// ETA in minutes. Nil if the order has no meaningful ETA.
     let eta: Int?
-    /// Progress percentage, matches the 6 discrete Figma variants.
-    let progress: ProgressStage
+    /// Progress fraction, 0.0 – 1.0. Continuously interpolated for Food
+    /// (based on remaining ETA), stepwise for Instamart (keyword-mapped).
+    /// The bar itself is spring-animated so any change slides smoothly.
+    let progress: Double
 }
 
-/// The six discrete progress stages from the Figma progress bar component.
+/// Milestone anchors kept as an enum for referenceability in code + fixtures.
+/// Nothing forces the runtime progress to snap to these — Food interpolates
+/// between them based on ETA. Ordered lowest → highest, values are percentages.
 enum ProgressStage: Int, CaseIterable {
     case placed      = 10
     case preparing   = 25

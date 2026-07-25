@@ -22,7 +22,7 @@ enum Fixtures {
         context: "Truffles • Grilled Fish in Lemon Butter Sauce",
         status: "Out for delivery",
         eta: 10,
-        progress: .inTransit
+        progress: ProgressStage.inTransit.fraction
     )
 
     /// Instamart order packed, long context that should truncate.
@@ -32,7 +32,7 @@ enum Fixtures {
         context: "Modern 100% Whole Wheat Bread • Yogabar Dark Chocolate Oats • Robusta Bananas",
         status: "Order Packed",
         eta: 5,
-        progress: .packed
+        progress: ProgressStage.packed.fraction
     )
 
     /// Food order with a long status line that should wrap to two lines.
@@ -42,7 +42,7 @@ enum Fixtures {
         context: "Theobroma • Chicken Tikka Sandwich",
         status: "Delivery partner is at the restaurant",
         eta: 15,
-        progress: .preparing
+        progress: ProgressStage.preparing.fraction
     )
 
     /// Instamart nearby, close ETA, real status copy from the captures.
@@ -52,7 +52,7 @@ enum Fixtures {
         context: "Khadi Natural Coconut Milk & Honey Soap",
         status: "Your delivery partner is 2 minutes away",
         eta: 2,
-        progress: .nearby
+        progress: ProgressStage.nearby.fraction
     )
 
     // MARK: - Named states (drop-in for OrdersState during dev + previews)

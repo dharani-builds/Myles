@@ -39,6 +39,26 @@ final class OrdersState {
     /// Timestamp of the most recent successful fetch. `nil` until first success.
     private(set) var lastUpdated: Date?
 
+    /// When set, the popover shows the "Order Delivered :)" celebration screen
+    /// until `Self.celebrationDuration` seconds have elapsed. Set the moment
+    /// we observe the last active order disappear (delivered — see setLoaded).
+    /// Cleared as soon as a new active order arrives (Q3 — active tracking
+    /// wins over the celebration).
+    private(set) var celebrationStartedAt: Date?
+
+    /// How long the "Order Delivered :)" screen stays up before falling back
+    /// to the empty state. 60s per design.
+    static let celebrationDuration: TimeInterval = 60
+
+    /// Order IDs from the previous successful poll. Used to detect the
+    /// active → empty transition that triggers the celebration.
+    private var previousOrderIds: Set<String> = []
+
+    /// Sleeper task that clears `celebrationStartedAt` after 60s. Cancelled
+    /// (and replaced) when a new celebration begins, or when a new active
+    /// order arrives mid-celebration.
+    private var celebrationExpiryTask: Task<Void, Never>?
+
     /// When we escalate to `.error`, this tells the view which copy to render:
     ///   • `true`  → mid-order error ("Something went wrong" + Twitter link)
     ///   • `false` → cold error ("Couldn't fetch orders" + Twitter link)
@@ -64,10 +84,51 @@ final class OrdersState {
     // MARK: - Mutation (called by the poller, or by fixtures during dev)
 
     func setLoaded(_ orders: [Order]) {
+        let newIds = Set(orders.map(\.id))
+
+        // Celebration state transitions:
+        //   • non-empty → empty  ⇒ orders just delivered → start celebration
+        //   • empty     → empty  ⇒ leave celebrationStartedAt alone (expiring)
+        //   • any       → non-empty ⇒ clear (Q3: new active order overrides)
+        if !newIds.isEmpty {
+            endCelebration()
+        } else if !previousOrderIds.isEmpty {
+            beginCelebration()
+        }
+        previousOrderIds = newIds
+
         status = orders.isEmpty ? .empty : .loaded(orders)
         lastUpdated = Date()
         consecutiveErrorCount = 0
         hadOrdersAtErrorStart = false
+    }
+
+    /// True while we should be showing the "Order Delivered :)" screen.
+    /// Kept in sync by the expiry task in `beginCelebration()` — after 60s
+    /// the task clears `celebrationStartedAt`, which flips this to false and
+    /// triggers a SwiftUI re-render back to the empty state.
+    var isCelebrating: Bool {
+        celebrationStartedAt != nil
+    }
+
+    /// Start the "Order Delivered :)" window. Cancels any prior expiry task
+    /// (safety — this method is idempotent) and schedules a fresh 60s timer.
+    private func beginCelebration() {
+        celebrationExpiryTask?.cancel()
+        celebrationStartedAt = Date()
+        celebrationExpiryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.celebrationDuration))
+            guard !Task.isCancelled else { return }
+            self?.celebrationStartedAt = nil
+        }
+    }
+
+    /// End the celebration immediately (e.g. Q3 — a new active order came in
+    /// mid-window) and cancel the pending expiry task so it doesn't fire later.
+    private func endCelebration() {
+        celebrationExpiryTask?.cancel()
+        celebrationExpiryTask = nil
+        celebrationStartedAt = nil
     }
 
     func setError(_ message: String) {
@@ -101,6 +162,8 @@ final class OrdersState {
         status = .loading
         consecutiveErrorCount = 0
         hadOrdersAtErrorStart = false
+        endCelebration()
+        previousOrderIds = []
     }
 
     // MARK: - Helpers
@@ -120,6 +183,15 @@ final class OrdersState {
     static func previewError(_ message: String = "Preview error", midOrder: Bool) -> OrdersState {
         let s = OrdersState(initial: .error(message))
         s.hadOrdersAtErrorStart = midOrder
+        return s
+    }
+
+    /// A preview instance in the "Order Delivered :)" celebration state.
+    /// `celebrationStartedAt` is set to now; the real expiry task is skipped
+    /// so the preview screen stays visible in Xcode's canvas indefinitely.
+    static func previewCelebrating() -> OrdersState {
+        let s = OrdersState(initial: .empty)
+        s.celebrationStartedAt = Date()
         return s
     }
 }

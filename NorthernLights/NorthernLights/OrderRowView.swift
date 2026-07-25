@@ -105,7 +105,9 @@ private struct ETABadge: View {
 /// Reserving orange for progress (and green/blue for badge) keeps the card from
 /// reading as one-note in any single platform's color.
 private struct ProgressBarView: View {
-    let progress: ProgressStage
+    /// Fraction 0.0 – 1.0. Spring-animated on change so every poll cycle
+    /// slides the fill smoothly instead of snapping.
+    let progress: Double
 
     var body: some View {
         GeometryReader { geo in
@@ -113,7 +115,8 @@ private struct ProgressBarView: View {
                 Capsule().fill(Color.borderSubtle)
                 Capsule()
                     .fill(Color.swiggy500)
-                    .frame(width: geo.size.width * progress.fraction)
+                    .frame(width: geo.size.width * progress)
+                    .animation(.spring(response: 0.7, dampingFraction: 0.9), value: progress)
             }
         }
         .frame(height: 6)

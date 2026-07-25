@@ -109,6 +109,13 @@ final class MCPClient {
         let minPollInterval: TimeInterval?
     }
 
+    /// A permissive decodable used ONLY for capture-only side-calls where we
+    /// don't consume the response — we just want it to land in the JSONL log.
+    /// If the tool returns structuredContent, this happily decodes anything;
+    /// if it doesn't (see `track_food_order`), callTool throws
+    /// `missingStructuredContent` AFTER the capture has already been written.
+    private struct CaptureOnlyResult: Decodable {}
+
     /// Two-hop Food fetch: list active orders, then enrich each with live
     /// delivery status (ETA + terminal flags + poll interval).
     private func fetchFoodOrders() async throws -> FoodFetchOutcome {
@@ -131,6 +138,21 @@ final class MCPClient {
         var minInterval: TimeInterval?
         for raw in rawOrders {
             let status: FoodDeliveryStatus? = try? await fetchFoodDeliveryStatus(orderId: raw.orderId)
+
+            // Capture-only side-calls — fire off the two Food tools we DON'T
+            // currently consume, so their live responses land in the JSONL
+            // capture. Errors are swallowed (some of these may return empty
+            // structuredContent and throw); capture happens before throw.
+            let _: CaptureOnlyResult? = try? await callTool(
+                endpoint: foodEndpoint,
+                name: "track_food_order",
+                arguments: ["orderId": raw.orderId]
+            )
+            let _: CaptureOnlyResult? = try? await callTool(
+                endpoint: foodEndpoint,
+                name: "get_food_order_details",
+                arguments: ["orderId": raw.orderId]
+            )
 
             // Terminal flags win over `isActiveOrder` from the list —
             // `get_food_delivery_status` is more current.
@@ -244,6 +266,15 @@ final class MCPClient {
         let contentType = http.value(forHTTPHeaderField: "Content-Type") ?? ""
         let jsonData = try extractJSON(from: data, contentType: contentType)
 
+        // Forensic capture — every raw response goes to disk before decoding.
+        // See MCPCaptureLog for path + shape. Cheap append; failures swallowed.
+        MCPCaptureLog.shared.append(
+            tool: name,
+            endpoint: endpoint,
+            arguments: arguments,
+            responseJSON: jsonData
+        )
+
         let envelope = try JSONDecoder().decode(JSONRPCResponse<ToolCallResult<Result>>.self, from: jsonData)
 
         if let error = envelope.error {
@@ -324,10 +355,22 @@ private struct JSONRPCError: Decodable {
     let message: String
 }
 
-/// Shape of `result` for a `tools/call` response. We ignore `content` — it's
-/// prose for LLMs. All the JSON we care about is in `structuredContent`.
+/// Shape of `result` for a `tools/call` response.
+///
+/// `structuredContent` is the clean JSON we decode into typed models for the
+/// UI. `content` is the prose channel — Swiggy uses this for LLM-consumable
+/// text and, for `track_food_order`, this is currently the ONLY place any
+/// data lands (structuredContent comes back empty). We keep `content` around
+/// so the JSONL capture layer sees it too, and so anything conversational
+/// that lives here isn't silently lost.
 private struct ToolCallResult<Structured: Decodable>: Decodable {
     let structuredContent: Structured?
+    let content: [ContentBlock]?
+}
+
+private struct ContentBlock: Decodable {
+    let type: String?
+    let text: String?
 }
 
 // MARK: - Raw response shapes
@@ -353,7 +396,15 @@ private struct FoodOrderRaw: Decodable {
     let restaurantName: String
     let restaurantAreaName: String?
     let orderStatus: String       // "processing" | "Delivered" (coarse — see project memory)
+    /// Second status field observed in captured responses. For delivered
+    /// orders it's "delivered"; unknown enum values during active delivery.
+    /// Kept optional + decoded but currently unused — the capture layer
+    /// preserves it so a live order will expose its real values in the JSONL.
+    let orderDeliveryStatus: String?
     let orderedItems: String      // e.g. "Paneer Lemon Dry (1),Cream of Broccoli Soup (1)"
+    let orderTotal: String?       // e.g. "₹176". For future display.
+    let orderedTime: String?      // e.g. "July 23, 8:39 PM"
+    let orderType: String?        // e.g. "regular"
     let isActiveOrder: Bool
 }
 
@@ -422,33 +473,44 @@ private extension Order {
             .filter { !$0.isEmpty }
         let itemsLabel = itemNames.joined(separator: ", ")
 
-        // Status → progress. Food's `orderStatus` is coarse
-        // ("processing" | "Delivered"), so we blend in the delivery status's
-        // ETA to differentiate "in progress, far out" from "arriving soon".
-        let progress: ProgressStage
+        // Food's `orderStatus` is coarse ("processing" | "Delivered"), so
+        // both the status label and the bar are derived from ETA.
+        //
+        // Status label — still stepwise (three milestone phrases):
+        //   ETA > 10 min  → "Order in progress"
+        //   3 < ETA ≤ 10  → "On the way"
+        //   ETA ≤ 3       → "Arriving soon"
+        //
+        // Progress bar — CONTINUOUS. Uses a linear map from remaining ETA
+        // to a fraction, clamped [0.20 … 0.97]. So the bar physically
+        // slides each poll instead of jumping between three fixed steps.
+        // Formula: as ETA counts down 45 → 0, bar fills 20% → 97%.
+        // The 0.97 ceiling leaves room to show a distinct 100% at delivery.
+        // 45 minutes as `maxETA` matches Swiggy's typical order upper bound;
+        // longer orders clamp to the 20% floor until they drop below 45min.
         let statusLabel: String
         let remainingMinutes: Int? = status.map {
             let deltaMs = max(0, $0.deliveryBy - $0.serverNow)
             return Int((Double(deltaMs) / 60_000.0).rounded())
         }
 
+        let progressFraction: Double
         switch raw.orderStatus.lowercased() {
         case "delivered":
-            progress = .delivered
+            progressFraction = 1.0
             statusLabel = "Delivered"
         case "processing":
+            progressFraction = Self.foodProgressFromETA(remainingMinutes)
             if let mins = remainingMinutes, mins <= 3 {
-                progress = .nearby
                 statusLabel = "Arriving soon"
             } else if let mins = remainingMinutes, mins <= 10 {
-                progress = .inTransit
                 statusLabel = "On the way"
             } else {
-                progress = .preparing
                 statusLabel = "Order in progress"
             }
         default:
-            progress = .placed
+            // "just placed" style state before Swiggy flips to processing.
+            progressFraction = 0.10
             statusLabel = raw.orderStatus.capitalized
         }
 
@@ -458,8 +520,18 @@ private extension Order {
             context: "\(raw.restaurantName) • \(itemsLabel)",
             status: statusLabel,
             eta: remainingMinutes,
-            progress: progress
+            progress: progressFraction
         )
+    }
+
+    /// Continuous ETA-to-progress mapping. See init?(food:status:) for the
+    /// design notes. Extracted so it's easy to swap the curve later without
+    /// hunting through the switch.
+    private static func foodProgressFromETA(_ mins: Int?) -> Double {
+        guard let mins = mins, mins >= 0 else { return 0.20 }
+        let maxETA: Double = 45
+        let raw = 1.0 - min(Double(mins), maxETA) / maxETA
+        return min(0.97, max(0.20, raw))
     }
 
     /// Build an Order from a raw Instamart response row. Returns nil if the
@@ -480,20 +552,25 @@ private extension Order {
 
         // Progress inferred from keywords in `currentStatus`. Order matters:
         // "delivered" wins over "picked up" (a delivered order has been both).
+        // Kept stepwise (not ETA-interpolated like Food) because Instamart
+        // doesn't ship a live-decrementing ETA — `get_orders` returns a static
+        // "13 mins" style string, so there's no smooth signal to interpolate.
+        // The bar still animates between stages thanks to the spring in
+        // ProgressBarView; the underlying value just jumps between milestones.
         let cs = raw.currentStatus.lowercased()
-        let progress: ProgressStage
+        let progressFraction: Double
         if cs.contains("delivered") {
-            progress = .delivered
+            progressFraction = ProgressStage.delivered.fraction
         } else if cs.contains("nearby") || cs.contains("minutes away") || cs.contains("arriving") {
-            progress = .nearby
+            progressFraction = ProgressStage.nearby.fraction
         } else if cs.contains("picked up") || cs.contains("on the way") || cs.contains("out for delivery") {
-            progress = .inTransit
+            progressFraction = ProgressStage.inTransit.fraction
         } else if cs.contains("packed") {
-            progress = .packed
+            progressFraction = ProgressStage.packed.fraction
         } else if cs.contains("confirmed") || cs.contains("received") {
-            progress = .placed
+            progressFraction = ProgressStage.placed.fraction
         } else {
-            progress = .placed
+            progressFraction = ProgressStage.placed.fraction
         }
 
         self.init(
@@ -502,7 +579,80 @@ private extension Order {
             context: context,
             status: raw.currentStatus,
             eta: eta,
-            progress: progress
+            progress: progressFraction
         )
+    }
+}
+
+// MARK: - MCP capture log (forensic JSONL for post-order analysis)
+//
+// Writes one JSON object per line to
+// `~/Library/Application Support/NorthernLights/captures/YYYY-MM-DD.jsonl`.
+// Each entry has: timestamp, tool name, endpoint URL, arguments, and the
+// full raw response envelope (including anything in `content[]` that our
+// typed decoders drop). Fire-and-forget — write errors are swallowed so
+// capture never blocks or breaks a real poll.
+//
+// Purpose: during Phase 4 real-order testing we want a paper trail of every
+// field Swiggy actually ships, not just the ones our typed models decode.
+// Post-order we `cat` the JSONL and audit for status text / delivery-partner
+// info / new enum values we might want to surface.
+//
+// Rotation: one file per day (computed at write time so an app that stays
+// running across midnight still writes to today's file, not yesterday's).
+
+private final class MCPCaptureLog: @unchecked Sendable {
+    static let shared = MCPCaptureLog()
+
+    private let baseDir: URL?
+    private let queue = DispatchQueue(label: "com.dharani.NorthernLights.MCPCaptureLog")
+    private let isoFormatter: ISO8601DateFormatter
+    private let dayFormatter: DateFormatter
+
+    private init() {
+        self.isoFormatter = ISO8601DateFormatter()
+        self.isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        self.dayFormatter = DateFormatter()
+        self.dayFormatter.dateFormat = "yyyy-MM-dd"
+
+        let dir = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first?
+            .appendingPathComponent("NorthernLights")
+            .appendingPathComponent("captures")
+        if let dir {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        self.baseDir = dir
+    }
+
+    func append(tool: String, endpoint: URL, arguments: [String: Any], responseJSON: Data) {
+        guard let baseDir else { return }
+
+        // Snapshot values before dispatching — [String: Any] isn't Sendable.
+        let snapshot: [String: Any] = [
+            "timestamp": isoFormatter.string(from: Date()),
+            "tool": tool,
+            "endpoint": endpoint.absoluteString,
+            "arguments": arguments,
+            "response": (try? JSONSerialization.jsonObject(with: responseJSON)) ?? "<unparseable>"
+        ]
+        let today = dayFormatter.string(from: Date())
+
+        queue.async { [baseDir] in
+            let fileURL = baseDir.appendingPathComponent("\(today).jsonl")
+            guard let data = try? JSONSerialization.data(withJSONObject: snapshot) else { return }
+
+            if !FileManager.default.fileExists(atPath: fileURL.path) {
+                FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+            }
+            guard let handle = try? FileHandle(forWritingTo: fileURL) else { return }
+            defer { try? handle.close() }
+            try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+            if let newline = "\n".data(using: .utf8) {
+                try? handle.write(contentsOf: newline)
+            }
+        }
     }
 }

@@ -53,7 +53,15 @@ struct ContentView: View {
         case .loading:
             OrdersLoadingView()
         case .empty:
-            EmptyOrdersView()
+            // After an active order transitions to delivered, OrdersState
+            // sets `celebrationStartedAt` for 60s. During that window we show
+            // the success screen instead of the empty state. A new active
+            // order (Q3) or 60s of nothing cancels/expires it.
+            if ordersState.isCelebrating {
+                OrdersDeliveredView()
+            } else {
+                EmptyOrdersView()
+            }
         case .loaded(let orders):
             OrderCardView(orders: orders)
         case .error:
@@ -234,6 +242,40 @@ private struct EmptyOrdersView: View {
     }
 }
 
+// MARK: - Delivered (Figma 213:476)
+//
+// Post-delivery celebration screen — shown for 60s after the last active
+// order transitions to delivered. Same structural pattern as the empty and
+// error screens (header + illustration + title). Uses the shared footer
+// like every other orders-state view — the design's alternate footer in
+// the Figma comp is deprecated per project note.
+//
+// Copy: "Order Delivered :)" — text/secondary, 16pt bold (matches the
+// error screen title). Illustration is the thumbs-up Myles at 161×132
+// (same proportions as the LoginIllustration slot).
+
+private struct OrdersDeliveredView: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            SharedHeader()
+            SharedSolidDivider()
+            VStack(spacing: 12) {
+                Image("SuccessIllustration")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 161, height: 132)
+                Text("Order Delivered :)")
+                    .font(.system(size: 16, weight: .bold))
+                    .tracking(-0.16)
+                    .foregroundStyle(Color.textSecondary)
+                    .frame(height: 24)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(16)
+        }
+    }
+}
+
 // MARK: - Error content (shared between "cold" + "mid-order" variants)
 //
 // Same illustration + title + "Help me fix it" link.
@@ -365,6 +407,13 @@ private struct SharedSolidDivider: View {
     ContentView()
         .environment(AuthState.previewAuthenticated)
         .environment(OrdersState(initial: .empty))
+        .environment(OrdersPoller.previewIdle(intervalSeconds: 300))
+}
+
+#Preview("Orders · delivered (celebration)") {
+    ContentView()
+        .environment(AuthState.previewAuthenticated)
+        .environment(OrdersState.previewCelebrating())
         .environment(OrdersPoller.previewIdle(intervalSeconds: 300))
 }
 
