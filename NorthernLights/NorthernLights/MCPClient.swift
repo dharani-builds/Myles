@@ -153,15 +153,16 @@ final class MCPClient {
         for raw in rawOrders {
             let status: FoodDeliveryStatus? = try? await fetchFoodDeliveryStatus(orderId: raw.orderId)
 
-            // Capture-only side-calls — fire off the two Food tools we DON'T
-            // currently consume, so their live responses land in the JSONL
-            // capture. Errors are swallowed (some of these may return empty
-            // structuredContent and throw); capture happens before throw.
-            let _: CaptureOnlyResult? = try? await callTool(
+            // track_food_order — the conversational status text ("Order
+            // Received!", "Partner is on the way", etc.) that we use as
+            // the status label. Content channel, not structuredContent.
+            let trackText: String? = try? await callToolForContentText(
                 endpoint: foodEndpoint,
                 name: "track_food_order",
                 arguments: ["orderId": raw.orderId]
             )
+
+            // Capture-only — data we're logging but not consuming yet.
             let _: CaptureOnlyResult? = try? await callTool(
                 endpoint: foodEndpoint,
                 name: "get_food_order_details",
@@ -173,7 +174,7 @@ final class MCPClient {
             if status?.delivered == true || status?.cancelled == true {
                 continue
             }
-            if let order = Order(food: raw, status: status) {
+            if let order = Order(food: raw, status: status, trackText: trackText) {
                 orders.append(order)
             }
             if let sec = status?.pollIntervalSec {
@@ -298,6 +299,74 @@ final class MCPClient {
             throw MCPError.missingStructuredContent
         }
         return structured
+    }
+
+    /// Companion to `callTool` for tools whose useful data lives in the
+    /// prose `content[]` channel instead of `structuredContent`. Right now
+    /// this is only `track_food_order` — its structuredContent comes back
+    /// empty, but `content[0].text` carries the actual conversational status
+    /// ("Partner is on the way", etc.).
+    ///
+    /// Same request/response plumbing as `callTool`, same JSONL capture,
+    /// just decodes a different field. Returns nil if no content text is
+    /// present (which is normal — the caller should fall back).
+    private func callToolForContentText(
+        endpoint: URL,
+        name: String,
+        arguments: [String: Any]
+    ) async throws -> String? {
+        guard let token = KeychainStore.get(.swiggyAccessToken) else {
+            throw MCPError.notAuthenticated
+        }
+
+        let requestId = nextRequestId
+        nextRequestId += 1
+
+        let body: [String: Any] = [
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": ["name": name, "arguments": arguments],
+            "id": requestId
+        ]
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
+        if let sessionId {
+            request.setValue(sessionId, forHTTPHeaderField: "Mcp-Session-Id")
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MCPError.invalidResponse
+        }
+        if let sid = http.value(forHTTPHeaderField: "Mcp-Session-Id") {
+            sessionId = sid
+        }
+        guard (200...299).contains(http.statusCode) else {
+            if http.statusCode == 401 { throw MCPError.unauthorized }
+            let bodyText = String(data: data, encoding: .utf8) ?? ""
+            throw MCPError.httpError(status: http.statusCode, body: bodyText)
+        }
+
+        let contentType = http.value(forHTTPHeaderField: "Content-Type") ?? ""
+        let jsonData = try extractJSON(from: data, contentType: contentType)
+
+        MCPCaptureLog.shared.append(
+            tool: name,
+            endpoint: endpoint,
+            arguments: arguments,
+            responseJSON: jsonData
+        )
+
+        let envelope = try JSONDecoder().decode(JSONRPCResponse<ToolCallResult<CaptureOnlyResult>>.self, from: jsonData)
+        if let error = envelope.error {
+            throw MCPError.toolError(error.message)
+        }
+        return envelope.result?.content?.first?.text
     }
 
     /// If the response came back as SSE (`text/event-stream`), pull the JSON
@@ -463,13 +532,17 @@ private struct InstamartItem: Decodable {
 private extension Order {
 
     /// Build an Order from a raw Food response row plus (optionally) the live
-    /// delivery status. Returns nil if the order isn't active.
+    /// delivery status and the track_food_order prose text. Returns nil if
+    /// the order isn't active.
     ///
-    /// - When `status` is present, uses it to compute a real ETA in minutes
-    ///   and to override `orderStatus` with a finer label near delivery.
-    /// - When `status` is nil (the side-call failed), still shows the order —
-    ///   just with `eta = nil`.
-    init?(food raw: FoodOrderRaw, status: FoodDeliveryStatus?) {
+    /// - `status` (from `get_food_delivery_status`): live ETA + terminal flags.
+    /// - `trackText` (from `track_food_order.content[0].text`): Swiggy's own
+    ///   conversational status phrase, e.g.
+    ///     `Order 24394...: Partner is on the way (Frozen Bottle...) - ETA: 14 mins`
+    ///   We parse the middle phrase and use it as the status label when
+    ///   available — that's Swiggy's real user-facing copy. Otherwise we
+    ///   fall back to the ETA-bucketed labels we invent locally.
+    init?(food raw: FoodOrderRaw, status: FoodDeliveryStatus?, trackText: String? = nil) {
         guard raw.isActiveOrder else { return nil }
 
         // Multi-item context.
@@ -508,14 +581,20 @@ private extension Order {
             return Int((Double(deltaMs) / 60_000.0).rounded())
         }
 
+        // Swiggy's own conversational phrase (if we got it) beats any label
+        // we might invent — it's the same copy shown in the iOS Live Activity.
+        let swiggyPhrase = Order.parseTrackOrderStatusPhrase(trackText)
+
         let progressFraction: Double
         switch raw.orderStatus.lowercased() {
         case "delivered":
             progressFraction = 1.0
-            statusLabel = "Delivered"
+            statusLabel = swiggyPhrase ?? "Delivered"
         case "processing":
             progressFraction = Self.foodProgressFromETA(remainingMinutes)
-            if let mins = remainingMinutes, mins <= 3 {
+            if let phrase = swiggyPhrase {
+                statusLabel = phrase
+            } else if let mins = remainingMinutes, mins <= 3 {
                 statusLabel = "Arriving soon"
             } else if let mins = remainingMinutes, mins <= 10 {
                 statusLabel = "On the way"
@@ -523,9 +602,9 @@ private extension Order {
                 statusLabel = "Order in progress"
             }
         default:
-            // "just placed" style state before Swiggy flips to processing.
+            // "just placed" state before Swiggy flips to processing.
             progressFraction = 0.10
-            statusLabel = raw.orderStatus.capitalized
+            statusLabel = swiggyPhrase ?? raw.orderStatus.capitalized
         }
 
         self.init(
@@ -546,6 +625,37 @@ private extension Order {
         let maxETA: Double = 45
         let raw = 1.0 - min(Double(mins), maxETA) / maxETA
         return min(0.97, max(0.20, raw))
+    }
+
+    /// Extract Swiggy's conversational status phrase from the
+    /// `track_food_order` prose text. Expected format (observed in live
+    /// capture on 2026-07-25):
+    ///
+    ///     "Order 243...: Partner is on the way (Frozen Bottle...) - ETA: 14 mins"
+    ///
+    /// The phrase between `: ` and the trailing ` (` is what we want.
+    /// Returns nil if the input is nil, empty, or doesn't match — caller
+    /// falls back to invented labels in that case (see init?(food:...)).
+    ///
+    /// Deliberately permissive: if Swiggy changes the format around
+    /// delivery or edge states, we return nil and the ETA-bucketed labels
+    /// take over. No brittle whole-string matching.
+    fileprivate static func parseTrackOrderStatusPhrase(_ text: String?) -> String? {
+        guard let text, !text.isEmpty else { return nil }
+        // Regex: after "Order <digits>: " capture up to the last " (" before " - ETA:"
+        // Non-greedy phrase, greedy restaurant so nested parens in restaurant names
+        // (rare but possible) don't break the parse.
+        let pattern = #"^Order \d+:\s+(.+?)\s+\(.*\)\s+-\s+ETA:"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(
+                in: text,
+                range: NSRange(text.startIndex..., in: text)
+              ),
+              match.numberOfRanges >= 2,
+              let phraseRange = Range(match.range(at: 1), in: text)
+        else { return nil }
+        let phrase = String(text[phraseRange]).trimmingCharacters(in: .whitespaces)
+        return phrase.isEmpty ? nil : phrase
     }
 
     /// Build an Order from a raw Instamart response row. Returns nil if the
