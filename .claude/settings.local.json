@@ -92,7 +92,14 @@
       "Bash(git remote *)",
       "Bash(xcodebuild -project Myles.xcodeproj -scheme Myles -configuration Release build -destination 'platform=macOS')",
       "Bash(python3 -)",
-      "Bash(rsvg-convert -w 400 -h 400 \"design-assets/myles vector.svg\" -o /tmp/glyph_probe.png)"
+      "Bash(rsvg-convert -w 400 -h 400 \"design-assets/myles vector.svg\" -o /tmp/glyph_probe.png)",
+      "Bash(codesign -dvvv /Applications/Myles.app)",
+      "Bash(spctl -a -vvv /Applications/Myles.app)",
+      "Bash(security find-identity *)",
+      "Bash(chmod +x scripts/make-dmg.sh)",
+      "Bash(./scripts/make-dmg.sh)",
+      "Bash(bash -x ./scripts/make-dmg.sh)",
+      "Bash(git checkout *)"
     ]
   }
 }
