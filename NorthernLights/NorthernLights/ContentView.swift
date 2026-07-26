@@ -23,15 +23,22 @@ struct ContentView: View {
     @Environment(OrdersState.self) private var ordersState
 
     var body: some View {
-        switch authState.status {
-        case .idle, .authorizing, .error:
-            // One screen handles all three auth states inline — the CTA button
-            // reflects the state (label, spinner, disabled), and any error copy
-            // shows above it. No dedicated "auth loading" or "auth error" screen.
-            LoginView()
-        case .authenticated:
-            ordersScreen
+        Group {
+            switch authState.status {
+            case .idle, .authorizing, .error:
+                // One screen handles all three auth states inline — the CTA button
+                // reflects the state (label, spinner, disabled), and any error copy
+                // shows above it. No dedicated "auth loading" or "auth error" screen.
+                LoginView()
+            case .authenticated:
+                ordersScreen
+            }
         }
+        // Strip the MenuBarExtra popover's opaque window backing so the
+        // `.glassEffect(...)` on the inner card actually has desktop
+        // content to blur. Without this the popover chrome is opaque and
+        // the glass just looks like a muddy tint on solid dark.
+        .background(PopoverWindowTransparent())
     }
 
     /// Shared card that wraps whichever orders-state view is active + the footer.
@@ -351,6 +358,33 @@ private struct SharedHeader: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
     }
+}
+
+// MARK: - Popover window transparency
+//
+// MenuBarExtra's popover window has its own opaque backing by default, which
+// means any `.glassEffect(...)` inside our content has nothing real to blur —
+// the effect just sits on top of solid dark chrome and reads as muddy tint.
+//
+// This tiny NSViewRepresentable walks up to the hosting NSWindow (async, so
+// the view is already attached) and clears its backing, letting the desktop
+// / wallpaper show through. Our own `.glassEffect` then composes against real
+// backdrop content. Drop-shadow is turned off because we're already drawing
+// one via `.shadow(...)` on the card.
+
+private struct PopoverWindowTransparent: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.hasShadow = false
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 private struct SharedSolidDivider: View {
