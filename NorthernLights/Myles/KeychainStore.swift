@@ -83,7 +83,7 @@ enum KeychainStore {
     private static func baseQuery(for key: Key) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.dharani.NorthernLights",
+            kSecAttrService as String: "com.dharani.Myles",
             kSecAttrAccount as String: key.rawValue
         ]
     }

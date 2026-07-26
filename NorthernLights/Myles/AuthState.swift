@@ -13,7 +13,7 @@ import Foundation
 /// cleared automatically on the next `signIn()` attempt or explicit `signOut()`.
 ///
 /// **For testing during dev:** to wipe local credentials from the terminal:
-///   `security delete-generic-password -s com.dharani.NorthernLights`
+///   `security delete-generic-password -s com.dharani.Myles`
 ///   (run three times — once per stored key: clientId, accessToken, refreshToken)
 @MainActor
 @Observable

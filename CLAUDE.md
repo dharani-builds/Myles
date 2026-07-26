@@ -1,6 +1,8 @@
-# Northern Lights
+# Myles
 
 A macOS menu bar app that shows real-time Swiggy delivery status (Food + Instamart) at a glance — without opening the app or getting distracted by notifications.
+
+> Previously known internally as **Northern Lights** — you may still see that name in a few historical places (repo folder, Xcode project file) until those get renamed on their own passes.
 
 ## What this is
 
@@ -30,9 +32,9 @@ Passive utility app. Lives in the Mac menu bar. Polls Swiggy's MCP API to show a
 ## Project structure (planned)
 
 ```
-Northern Lights/
-├── NorthernLights.xcodeproj
-├── NorthernLights/
+Myles/
+├── Myles.xcodeproj
+├── Myles/
 │   ├── App/
 │   ├── MenuBar/
 │   ├── Swiggy/          # MCP auth + API calls

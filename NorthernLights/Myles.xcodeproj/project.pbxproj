@@ -7,13 +7,13 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		02D074C72FFDEEAE00DD1869 /* NorthernLights.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NorthernLights.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		02D074C72FFDEEAE00DD1869 /* Myles.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Myles.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		02D074C92FFDEEAE00DD1869 /* NorthernLights */ = {
+		02D074C92FFDEEAE00DD1869 /* Myles */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = NorthernLights;
+			path = Myles;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -32,7 +32,7 @@
 		02D074BE2FFDEEAE00DD1869 = {
 			isa = PBXGroup;
 			children = (
-				02D074C92FFDEEAE00DD1869 /* NorthernLights */,
+				02D074C92FFDEEAE00DD1869 /* Myles */,
 				02D074C82FFDEEAE00DD1869 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -40,7 +40,7 @@
 		02D074C82FFDEEAE00DD1869 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				02D074C72FFDEEAE00DD1869 /* NorthernLights.app */,
+				02D074C72FFDEEAE00DD1869 /* Myles.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,9 +48,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		02D074C62FFDEEAE00DD1869 /* NorthernLights */ = {
+		02D074C62FFDEEAE00DD1869 /* Myles */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 02D074D22FFDEEAF00DD1869 /* Build configuration list for PBXNativeTarget "NorthernLights" */;
+			buildConfigurationList = 02D074D22FFDEEAF00DD1869 /* Build configuration list for PBXNativeTarget "Myles" */;
 			buildPhases = (
 				02D074C32FFDEEAE00DD1869 /* Sources */,
 				02D074C42FFDEEAE00DD1869 /* Frameworks */,
@@ -61,13 +61,13 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				02D074C92FFDEEAE00DD1869 /* NorthernLights */,
+				02D074C92FFDEEAE00DD1869 /* Myles */,
 			);
-			name = NorthernLights;
+			name = Myles;
 			packageProductDependencies = (
 			);
 			productName = NorthernLights;
-			productReference = 02D074C72FFDEEAE00DD1869 /* NorthernLights.app */;
+			productReference = 02D074C72FFDEEAE00DD1869 /* Myles.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -85,7 +85,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 02D074C22FFDEEAE00DD1869 /* Build configuration list for PBXProject "NorthernLights" */;
+			buildConfigurationList = 02D074C22FFDEEAE00DD1869 /* Build configuration list for PBXProject "Myles" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -99,7 +99,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				02D074C62FFDEEAE00DD1869 /* NorthernLights */,
+				02D074C62FFDEEAE00DD1869 /* Myles */,
 			);
 		};
 /* End PBXProject section */
@@ -308,7 +308,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		02D074C22FFDEEAE00DD1869 /* Build configuration list for PBXProject "NorthernLights" */ = {
+		02D074C22FFDEEAE00DD1869 /* Build configuration list for PBXProject "Myles" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				02D074D02FFDEEAF00DD1869 /* Debug */,
@@ -317,7 +317,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		02D074D22FFDEEAF00DD1869 /* Build configuration list for PBXNativeTarget "NorthernLights" */ = {
+		02D074D22FFDEEAF00DD1869 /* Build configuration list for PBXNativeTarget "Myles" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				02D074D32FFDEEAF00DD1869 /* Debug */,

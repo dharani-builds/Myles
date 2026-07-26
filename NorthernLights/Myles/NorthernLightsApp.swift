@@ -1,6 +1,6 @@
 //
-//  NorthernLightsApp.swift
-//  NorthernLights
+//  MylesApp.swift
+//  Myles
 //
 //  Created by Dharanitharan R on 08/07/26.
 //
@@ -9,7 +9,7 @@ import SwiftUI
 import AppKit
 
 @main
-struct NorthernLightsApp: App {
+struct MylesApp: App {
 
     // MARK: - Fixtures escape hatch
     //
@@ -61,7 +61,7 @@ struct NorthernLightsApp: App {
     var body: some Scene {
         // "MenuBarIcon" is a template image (Assets.xcassets), so macOS
         // recolors it automatically for light/dark menu bars.
-        MenuBarExtra("Northern Lights", image: "MenuBarIcon") {
+        MenuBarExtra("Myles", image: "MenuBarIcon") {
             ContentView()
                 .environment(authState)
                 .environment(ordersState)

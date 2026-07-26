@@ -9,7 +9,7 @@ import Foundation
 ///   4. Repeat until `stop()` is called
 ///
 /// The poller does NOT decide when it should be running — that's the caller's
-/// job. `NorthernLightsApp` watches `AuthState` and calls `start()` / `stop()`
+/// job. `MylesApp` watches `AuthState` and calls `start()` / `stop()`
 /// on auth transitions, and calls `refreshNowIfStale()` when the popover opens.
 ///
 /// **Polling ladder (empty state):**

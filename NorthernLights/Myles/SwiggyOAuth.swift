@@ -34,7 +34,7 @@ final class SwiggyOAuth {
     private enum Config {
         // Loopback redirect. Must match what LocalCallbackServer listens on.
         static let redirectURI = "http://127.0.0.1:\(LocalCallbackServer.port)/callback"
-        static let clientName = "Northern Lights"
+        static let clientName = "Myles"
         static let scope = "mcp:tools mcp:resources mcp:prompts"
     }
 

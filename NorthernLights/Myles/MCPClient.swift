@@ -723,7 +723,7 @@ private extension Order {
 // MARK: - MCP capture log (forensic JSONL for post-order analysis)
 //
 // Writes one JSON object per line to
-// `~/Library/Application Support/NorthernLights/captures/YYYY-MM-DD.jsonl`.
+// `~/Library/Application Support/Myles/captures/YYYY-MM-DD.jsonl`.
 // Each entry has: timestamp, tool name, endpoint URL, arguments, and the
 // full raw response envelope (including anything in `content[]` that our
 // typed decoders drop). Fire-and-forget — write errors are swallowed so
@@ -741,7 +741,7 @@ private final class MCPCaptureLog: @unchecked Sendable {
     static let shared = MCPCaptureLog()
 
     private let baseDir: URL?
-    private let queue = DispatchQueue(label: "com.dharani.NorthernLights.MCPCaptureLog")
+    private let queue = DispatchQueue(label: "com.dharani.Myles.MCPCaptureLog")
     private let isoFormatter: ISO8601DateFormatter
     private let dayFormatter: DateFormatter
 
@@ -754,7 +754,7 @@ private final class MCPCaptureLog: @unchecked Sendable {
         let dir = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first?
-            .appendingPathComponent("NorthernLights")
+            .appendingPathComponent("Myles")
             .appendingPathComponent("captures")
         if let dir {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

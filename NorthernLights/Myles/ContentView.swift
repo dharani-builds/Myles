@@ -1,6 +1,6 @@
 //
 //  ContentView.swift
-//  NorthernLights
+//  Myles
 //
 //  Created by Dharanitharan R on 08/07/26.
 //

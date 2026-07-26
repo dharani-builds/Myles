@@ -112,10 +112,10 @@ final class LocalCallbackServer: @unchecked Sendable {
             let html = """
             <!doctype html>
             <html>
-              <head><meta charset="utf-8"><title>Northern Lights</title></head>
+              <head><meta charset="utf-8"><title>Myles</title></head>
               <body style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;padding:3rem;color:#1C2024">
                 <h2>You're signed in.</h2>
-                <p style="color:#60646C">You can close this window and return to Northern Lights.</p>
+                <p style="color:#60646C">You can close this window and return to Myles.</p>
               </body>
             </html>
             """
