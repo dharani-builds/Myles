@@ -702,11 +702,18 @@ private extension Order {
             progressFraction = ProgressStage.placed.fraction
         }
 
+        // Swiggy ships two status strings on Instamart orders:
+        //   • currentStatus — terse label, e.g. "Order picked up"
+        //   • statusMessage — conversational, delivery-partner-aware,
+        //                     e.g. "DAVAL SAB has picked up your order"
+        // We prefer the conversational one (matches iOS app copy), fall
+        // back to currentStatus when it's absent. Same pattern as Food's
+        // track_food_order → invented-label fallback.
         self.init(
             id: raw.orderId,
             platform: .instamart,
             context: context,
-            status: raw.currentStatus,
+            status: raw.statusMessage ?? raw.currentStatus,
             eta: eta,
             progress: progressFraction
         )
