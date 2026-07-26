@@ -13,12 +13,27 @@ import SwiftUI
 struct OrderRowView: View {
     let order: Order
 
+    /// Hide the ETA badge when Swiggy explicitly stops estimating — that
+    /// happens once the partner is standing at the user's door and the
+    /// remaining time is meaningless. Detected via keyword match on the
+    /// status text (Swiggy sends "Arrived at location") combined with a
+    /// nil ETA, so a nil ETA from a mid-flight state (e.g. transient
+    /// delivery-status fetch failure) still shows the badge with "—".
+    /// When hidden, the left column expands to fill the row.
+    private var showsETABadge: Bool {
+        !(order.eta == nil && order.status.lowercased().contains("arrived"))
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: 24) {
             leftColumn
                 .frame(maxWidth: .infinity, alignment: .leading)
-            ETABadge(minutes: order.eta, platform: order.platform)
+            if showsETABadge {
+                ETABadge(minutes: order.eta, platform: order.platform)
+                    .transition(.opacity.combined(with: .scale(scale: 0.85)))
+            }
         }
+        .animation(.spring(response: 0.5, dampingFraction: 0.85), value: showsETABadge)
     }
 
     private var leftColumn: some View {
