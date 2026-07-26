@@ -91,7 +91,8 @@
       "Bash(xcodebuild -project Myles/Myles.xcodeproj -scheme Myles -configuration Debug build -destination 'platform=macOS')",
       "Bash(git remote *)",
       "Bash(xcodebuild -project Myles.xcodeproj -scheme Myles -configuration Release build -destination 'platform=macOS')",
-      "Bash(python3 -)"
+      "Bash(python3 -)",
+      "Bash(rsvg-convert -w 400 -h 400 \"design-assets/myles vector.svg\" -o /tmp/glyph_probe.png)"
     ]
   }
 }
