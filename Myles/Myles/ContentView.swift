@@ -297,7 +297,7 @@ private struct OrdersErrorContentView: View {
     let title: String
 
     private var feedbackURL: URL? {
-        URL(string: "https://x.com/Dharani_design")
+        URL(string: "https://x.com/messages/compose?recipient_id=1849333390647894016")
     }
 
     var body: some View {

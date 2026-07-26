@@ -31,7 +31,7 @@ struct OrdersFooterView: View {
             Spacer(minLength: 8)
             MoreMenu(
                 openFeedback: {
-                    if let url = URL(string: "https://x.com/Dharani_design") {
+                    if let url = URL(string: "https://x.com/messages/compose?recipient_id=1849333390647894016") {
                         NSWorkspace.shared.open(url)
                     }
                 },
