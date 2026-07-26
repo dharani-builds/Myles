@@ -89,7 +89,9 @@
       "Bash(rm \"/Users/dharanitharan.r/.claude/projects/-Users-dharanitharan-r-Projects-Northern-Lights/memory/project_northern_lights.md\")",
       "Bash(xcodebuild -project Myles.xcodeproj -scheme Myles -configuration Debug build -destination 'platform=macOS')",
       "Bash(xcodebuild -project Myles/Myles.xcodeproj -scheme Myles -configuration Debug build -destination 'platform=macOS')",
-      "Bash(git remote *)"
+      "Bash(git remote *)",
+      "Bash(xcodebuild -project Myles.xcodeproj -scheme Myles -configuration Release build -destination 'platform=macOS')",
+      "Bash(python3 -)"
     ]
   }
 }

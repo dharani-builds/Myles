@@ -729,16 +729,37 @@ private extension Order {
 // typed decoders drop). Fire-and-forget — write errors are swallowed so
 // capture never blocks or breaks a real poll.
 //
-// Purpose: during Phase 4 real-order testing we want a paper trail of every
-// field Swiggy actually ships, not just the ones our typed models decode.
-// Post-order we `cat` the JSONL and audit for status text / delivery-partner
-// info / new enum values we might want to surface.
+// Purpose: when Swiggy's MCP surface changes (or we suspect we're dropping a
+// field), turn this on, place an order, then read the JSONL to see exactly
+// what came over the wire — not just what our typed models decode. This is
+// how we found the conversational status text hiding in `content[]`.
 //
-// Rotation: one file per day (computed at write time so an app that stays
-// running across midnight still writes to today's file, not yesterday's).
+// ENABLEMENT
+//   • DEBUG builds  → ON by default (dev loop convenience).
+//   • RELEASE builds → OFF by default. Responses contain order history,
+//     addresses, and item names, so the installed app shouldn't accumulate
+//     that on disk unless explicitly asked.
+//   • Either default can be overridden without a rebuild:
+//         defaults write com.dharani.Myles MylesCaptureMCPResponses -bool true
+//         defaults write com.dharani.Myles MylesCaptureMCPResponses -bool false
+//     Read once at startup, so flip it then relaunch.
+//
+// RETENTION
+//   One file per day (day computed at write time, so an app left running
+//   across midnight rolls over correctly). Files older than `retentionDays`
+//   are pruned once per launch, so an always-on capture can't grow forever.
 
 private final class MCPCaptureLog: @unchecked Sendable {
     static let shared = MCPCaptureLog()
+
+    /// UserDefaults key for the manual override described above.
+    private static let enabledDefaultsKey = "MylesCaptureMCPResponses"
+
+    /// Daily capture files older than this are deleted at launch.
+    private static let retentionDays = 7
+
+    /// Whether to write anything at all. Resolved once at init.
+    private let isEnabled: Bool
 
     private let baseDir: URL?
     private let queue = DispatchQueue(label: "com.dharani.Myles.MCPCaptureLog")
@@ -746,10 +767,30 @@ private final class MCPCaptureLog: @unchecked Sendable {
     private let dayFormatter: DateFormatter
 
     private init() {
+        // Build default: on in DEBUG, off in RELEASE. Overridable via
+        // UserDefaults (absent key → keep the build default).
+        #if DEBUG
+        let buildDefault = true
+        #else
+        let buildDefault = false
+        #endif
+        if UserDefaults.standard.object(forKey: Self.enabledDefaultsKey) != nil {
+            self.isEnabled = UserDefaults.standard.bool(forKey: Self.enabledDefaultsKey)
+        } else {
+            self.isEnabled = buildDefault
+        }
+
         self.isoFormatter = ISO8601DateFormatter()
         self.isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         self.dayFormatter = DateFormatter()
         self.dayFormatter.dateFormat = "yyyy-MM-dd"
+
+        // Don't even create the directory when disabled — a release install
+        // that never turns capture on leaves no trace on disk.
+        guard isEnabled else {
+            self.baseDir = nil
+            return
+        }
 
         let dir = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
@@ -760,9 +801,34 @@ private final class MCPCaptureLog: @unchecked Sendable {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         }
         self.baseDir = dir
+
+        if let dir {
+            pruneOldCaptures(in: dir)
+        }
+    }
+
+    /// Delete daily capture files older than `retentionDays`. Runs once per
+    /// launch on the capture queue so it never blocks startup.
+    private func pruneOldCaptures(in dir: URL) {
+        let cutoff = Date().addingTimeInterval(-Double(Self.retentionDays) * 24 * 60 * 60)
+        queue.async {
+            guard let files = try? FileManager.default.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.contentModificationDateKey]
+            ) else { return }
+            for file in files where file.pathExtension == "jsonl" {
+                guard let modified = try? file.resourceValues(forKeys: [.contentModificationDateKey])
+                    .contentModificationDate else { continue }
+                if modified < cutoff {
+                    try? FileManager.default.removeItem(at: file)
+                }
+            }
+        }
     }
 
     func append(tool: String, endpoint: URL, arguments: [String: Any], responseJSON: Data) {
+        // `baseDir` is nil whenever capture is disabled, so this single guard
+        // covers both the disabled case and a failed directory lookup.
         guard let baseDir else { return }
 
         // Snapshot values before dispatching — [String: Any] isn't Sendable.

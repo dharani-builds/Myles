@@ -406,6 +406,7 @@ private struct SharedSolidDivider: View {
     ContentView()
         .environment(AuthState.previewSignedOut)
         .environment(OrdersState())
+        .environment(LaunchAtLogin())
         .environment(OrdersPoller.previewIdle())
 }
 
@@ -413,6 +414,7 @@ private struct SharedSolidDivider: View {
     ContentView()
         .environment(AuthState.previewSessionExpired)
         .environment(OrdersState())
+        .environment(LaunchAtLogin())
         .environment(OrdersPoller.previewIdle())
 }
 
@@ -420,6 +422,7 @@ private struct SharedSolidDivider: View {
     ContentView()
         .environment(AuthState.previewAuthorizing)
         .environment(OrdersState())
+        .environment(LaunchAtLogin())
         .environment(OrdersPoller.previewIdle())
 }
 
@@ -427,6 +430,7 @@ private struct SharedSolidDivider: View {
     ContentView()
         .environment(AuthState.previewAuthError)
         .environment(OrdersState())
+        .environment(LaunchAtLogin())
         .environment(OrdersPoller.previewIdle())
 }
 
@@ -434,6 +438,7 @@ private struct SharedSolidDivider: View {
     ContentView()
         .environment(AuthState.previewAuthenticated)
         .environment(OrdersState(initial: .loading))
+        .environment(LaunchAtLogin())
         .environment(OrdersPoller.previewIdle())
 }
 
@@ -441,6 +446,7 @@ private struct SharedSolidDivider: View {
     ContentView()
         .environment(AuthState.previewAuthenticated)
         .environment(OrdersState(initial: .empty))
+        .environment(LaunchAtLogin())
         .environment(OrdersPoller.previewIdle(intervalSeconds: 300))
 }
 
@@ -448,6 +454,7 @@ private struct SharedSolidDivider: View {
     ContentView()
         .environment(AuthState.previewAuthenticated)
         .environment(OrdersState.previewCelebrating())
+        .environment(LaunchAtLogin())
         .environment(OrdersPoller.previewIdle(intervalSeconds: 300))
 }
 
@@ -455,6 +462,7 @@ private struct SharedSolidDivider: View {
     ContentView()
         .environment(AuthState.previewAuthenticated)
         .environment(OrdersState(initial: .loaded(Fixtures.singleOrder)))
+        .environment(LaunchAtLogin())
         .environment(OrdersPoller.previewIdle(intervalSeconds: 45))
 }
 
@@ -462,6 +470,7 @@ private struct SharedSolidDivider: View {
     ContentView()
         .environment(AuthState.previewAuthenticated)
         .environment(OrdersState(initial: .loaded(Fixtures.mixedOrders)))
+        .environment(LaunchAtLogin())
         .environment(OrdersPoller.previewIdle(intervalSeconds: 45))
 }
 
@@ -469,6 +478,7 @@ private struct SharedSolidDivider: View {
     ContentView()
         .environment(AuthState.previewAuthenticated)
         .environment(OrdersState.previewError(midOrder: false))
+        .environment(LaunchAtLogin())
         .environment(OrdersPoller.previewIdle(intervalSeconds: 120))
 }
 
@@ -476,5 +486,6 @@ private struct SharedSolidDivider: View {
     ContentView()
         .environment(AuthState.previewAuthenticated)
         .environment(OrdersState.previewError(midOrder: true))
+        .environment(LaunchAtLogin())
         .environment(OrdersPoller.previewIdle(intervalSeconds: 45))
 }

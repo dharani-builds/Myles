@@ -24,6 +24,7 @@ struct MylesApp: App {
     @State private var authState: AuthState
     @State private var ordersState: OrdersState
     @State private var ordersPoller: OrdersPoller
+    @State private var launchAtLogin = LaunchAtLogin()
 
     // MARK: - Init
     //
@@ -66,6 +67,7 @@ struct MylesApp: App {
                 .environment(authState)
                 .environment(ordersState)
                 .environment(ordersPoller)
+                .environment(launchAtLogin)
                 // React to auth transitions:
                 //   • sign in  → start polling
                 //   • sign out → stop polling

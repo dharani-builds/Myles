@@ -16,6 +16,7 @@ import AppKit
 struct OrdersFooterView: View {
     @Environment(OrdersPoller.self) private var poller
     @Environment(AuthState.self) private var authState
+    @Environment(LaunchAtLogin.self) private var launchAtLogin
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
@@ -35,12 +36,17 @@ struct OrdersFooterView: View {
                         NSWorkspace.shared.open(url)
                     }
                 },
+                launchAtLoginOn: launchAtLogin.isEnabled,
+                setLaunchAtLogin: { launchAtLogin.setEnabled($0) },
                 logOut: { authState.signOut() },
                 quitApp: { NSApp.terminate(nil) }
             )
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        // The user can toggle login items from System Settings too, so
+        // re-read the real state each time the popover mounts.
+        .onAppear { launchAtLogin.refresh() }
     }
 
     private func copyForTick(now: Date) -> String {
@@ -78,6 +84,8 @@ struct OrdersFooterView: View {
 
 private struct MoreMenu: View {
     let openFeedback: () -> Void
+    let launchAtLoginOn: Bool
+    let setLaunchAtLogin: (Bool) -> Void
     let logOut: () -> Void
     let quitApp: () -> Void
 
@@ -87,6 +95,16 @@ private struct MoreMenu: View {
                 Button(action: openFeedback) {
                     Label("Have feedback? I'd love to hear it.", systemImage: "heart")
                 }
+                // Rendered by AppKit as a checkmark item. Bound through a
+                // get/set proxy because the source of truth lives in
+                // SMAppService, not in local view state.
+                Toggle(
+                    "Launch at login",
+                    isOn: Binding(
+                        get: { launchAtLoginOn },
+                        set: { setLaunchAtLogin($0) }
+                    )
+                )
                 Button(action: logOut) {
                     Label("Log out", systemImage: "rectangle.portrait.and.arrow.right")
                 }
@@ -115,6 +133,7 @@ private struct MoreMenu: View {
 #Preview("Footer · idle 5 min") {
     OrdersFooterView()
         .environment(AuthState.previewAuthenticated)
+        .environment(LaunchAtLogin())
         .environment(OrdersPoller.previewIdle(intervalSeconds: 300))
         .frame(width: 350)
         .background(Color.surfaceBackground)
@@ -123,6 +142,7 @@ private struct MoreMenu: View {
 #Preview("Footer · idle 60s") {
     OrdersFooterView()
         .environment(AuthState.previewAuthenticated)
+        .environment(LaunchAtLogin())
         .environment(OrdersPoller.previewIdle(intervalSeconds: 60))
         .frame(width: 350)
         .background(Color.surfaceBackground)
