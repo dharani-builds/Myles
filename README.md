@@ -1,12 +1,12 @@
 # Myles
 
-Myles is a menubar app that helps you track your food and instamart orders. You need not open your phone each time to check the status of your order. Log in once with your mobile number and it's there in the menu bar.
+Myles is a menubar app that helps you track your food and instamart orders. You don't have to open your phone each time to check the status of your order. Log in once with your mobile number and it's there in the menu bar.
 
-<!-- TODO: screenshot of the popover -->
+
 
 ## Why I built this
 
-I use an Android phone and a MacBook from work. A lot of people I know are on some version of that split.
+I use an Android phone and a Macbook from work. A lot of people I know are on some version of that split.
 
 Every time I order through Swiggy, I have to open the app just to check my order status. It's a small thing, but it happens often, and each time it means unlocking my phone, opening the app, and navigating to the order — just to glance at one piece of information.
 
