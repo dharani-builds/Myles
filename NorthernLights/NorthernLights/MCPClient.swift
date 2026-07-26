@@ -585,11 +585,16 @@ private extension Order {
         // we might invent — it's the same copy shown in the iOS Live Activity.
         let swiggyPhrase = Order.parseTrackOrderStatusPhrase(trackText)
 
+        // Fallback labels — used only when `track_food_order`'s prose is
+        // missing or unparseable. Deliberately mirror Swiggy's own phrasing
+        // ("Preparing your order", "Out for delivery") so the user can't tell
+        // whether the fallback fired or not. Kept in sync with the iOS
+        // Live Activity copy.
         let progressFraction: Double
         switch raw.orderStatus.lowercased() {
         case "delivered":
             progressFraction = 1.0
-            statusLabel = swiggyPhrase ?? "Delivered"
+            statusLabel = swiggyPhrase ?? "Order delivered!"
         case "processing":
             progressFraction = Self.foodProgressFromETA(remainingMinutes)
             if let phrase = swiggyPhrase {
@@ -597,14 +602,14 @@ private extension Order {
             } else if let mins = remainingMinutes, mins <= 3 {
                 statusLabel = "Arriving soon"
             } else if let mins = remainingMinutes, mins <= 10 {
-                statusLabel = "On the way"
+                statusLabel = "Out for delivery"
             } else {
-                statusLabel = "Order in progress"
+                statusLabel = "Preparing your order"
             }
         default:
             // "just placed" state before Swiggy flips to processing.
             progressFraction = 0.10
-            statusLabel = swiggyPhrase ?? raw.orderStatus.capitalized
+            statusLabel = swiggyPhrase ?? "Order received"
         }
 
         self.init(
