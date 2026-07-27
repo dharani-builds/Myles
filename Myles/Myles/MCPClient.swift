@@ -40,14 +40,24 @@ final class MCPClient {
 
     // MARK: - Public API
 
-    /// A single poll's output: the current orders + Swiggy's suggested next
-    /// poll interval (only present when Food status was fetched, since that's
-    /// where `pollIntervalSec` lives). Instamart doesn't offer one.
+    /// A single poll's output.
     struct FetchResult {
         let orders: [Order]
-        /// Seconds until the next poll, per Swiggy's `pollIntervalSec`.
-        /// `nil` means we didn't get a hint — caller should use its default.
+        /// Seconds until the next poll — the tightest interval Swiggy suggested
+        /// across all active orders (Food's `pollIntervalSec`, Instamart's
+        /// `pollingIntervalSeconds`). `nil` means no hint; caller uses its default.
         let suggestedPollInterval: TimeInterval?
+        /// Platforms whose fetch threw this cycle. Critical for the caller:
+        /// a platform that failed is NOT the same as a platform with no orders,
+        /// and conflating the two makes a delivered-order celebration fire on
+        /// a transient network blip. `OrdersState` uses this to carry forward
+        /// last-known orders and to suppress the celebration.
+        let failedPlatforms: Set<OrderPlatform>
+        /// Order IDs that Swiggy explicitly told us are complete this cycle
+        /// (Instamart `pollingIntervalSeconds == -1`, Food `delivered == true`).
+        /// Positive evidence of delivery, as opposed to an order merely
+        /// disappearing from the active list.
+        let deliveredOrderIds: Set<String>
     }
 
     /// Fetch every active order across Food + Instamart, in parallel, with
@@ -62,18 +72,21 @@ final class MCPClient {
         async let insta = fetchInstamartOrders()
 
         var foodOutcome: FoodFetchOutcome?
-        var instaOrders: [Order]?
+        var instaOutcome: InstamartFetchOutcome?
         var errors: [Error] = []
+        var failed: Set<OrderPlatform> = []
 
         do {
             foodOutcome = try await food
         } catch {
             errors.append(error)
+            failed.insert(.food)
         }
         do {
-            instaOrders = try await insta
+            instaOutcome = try await insta
         } catch {
             errors.append(error)
+            failed.insert(.instamart)
         }
 
         // Any 401 anywhere means the shared token is dead — force sign-out.
@@ -85,17 +98,19 @@ final class MCPClient {
 
         // Both platforms failed (non-auth) → propagate the first error so the
         // poller can escalate to `.error` after its own consecutive-failure threshold.
-        if foodOutcome == nil && instaOrders == nil, let first = errors.first {
+        if foodOutcome == nil && instaOutcome == nil, let first = errors.first {
             throw first
         }
 
-        // At least one platform succeeded — return partial data. The poller's
-        // consecutive-error counter resets on any non-throwing call, so a
-        // single-platform blip doesn't count as a "failure" toward the
-        // "Something went wrong" screen escalation.
+        // At least one platform succeeded — return partial data, but tell the
+        // caller which platform (if any) failed so it doesn't read the gap as
+        // "those orders are gone".
+        let intervals = [foodOutcome?.minPollInterval, instaOutcome?.minPollInterval].compactMap { $0 }
         return FetchResult(
-            orders: (foodOutcome?.orders ?? []) + (instaOrders ?? []),
-            suggestedPollInterval: foodOutcome?.minPollInterval
+            orders: (foodOutcome?.orders ?? []) + (instaOutcome?.orders ?? []),
+            suggestedPollInterval: intervals.min(),
+            failedPlatforms: failed,
+            deliveredOrderIds: (foodOutcome?.deliveredIds ?? []).union(instaOutcome?.deliveredIds ?? [])
         )
     }
 
@@ -107,6 +122,17 @@ final class MCPClient {
         /// Swiggy tightens the interval as delivery approaches; the caller
         /// should respect the fastest one so no order gets stale.
         let minPollInterval: TimeInterval?
+        /// Orders Swiggy flagged `delivered` this cycle.
+        let deliveredIds: Set<String>
+    }
+
+    private struct InstamartFetchOutcome {
+        let orders: [Order]
+        /// Lowest `pollingIntervalSeconds` across active Instamart orders.
+        let minPollInterval: TimeInterval?
+        /// Orders where `track_order` returned `pollingIntervalSeconds == -1`,
+        /// Swiggy's "this order is finished, stop polling" signal.
+        let deliveredIds: Set<String>
     }
 
     /// A permissive decodable used ONLY for capture-only side-calls where we
@@ -150,6 +176,7 @@ final class MCPClient {
         // TaskGroup complexity.
         var orders: [Order] = []
         var minInterval: TimeInterval?
+        var deliveredIds: Set<String> = []
         for raw in rawOrders {
             let status: FoodDeliveryStatus? = try? await fetchFoodDeliveryStatus(orderId: raw.orderId)
 
@@ -170,8 +197,14 @@ final class MCPClient {
             )
 
             // Terminal flags win over `isActiveOrder` from the list —
-            // `get_food_delivery_status` is more current.
-            if status?.delivered == true || status?.cancelled == true {
+            // `get_food_delivery_status` is more current. Only `delivered`
+            // counts as a celebration-worthy finish; a cancelled order is
+            // dropped silently.
+            if status?.delivered == true {
+                deliveredIds.insert(raw.orderId)
+                continue
+            }
+            if status?.cancelled == true {
                 continue
             }
             if let order = Order(food: raw, status: status, trackText: trackText) {
@@ -182,16 +215,64 @@ final class MCPClient {
                 minInterval = min(minInterval ?? asInterval, asInterval)
             }
         }
-        return FoodFetchOutcome(orders: orders, minPollInterval: minInterval)
+        return FoodFetchOutcome(
+            orders: orders,
+            minPollInterval: minInterval,
+            deliveredIds: deliveredIds
+        )
     }
 
-    private func fetchInstamartOrders() async throws -> [Order] {
+    /// Two-hop Instamart fetch, mirroring Food.
+    ///
+    /// `get_orders` gives the list plus the ETA string, but its status fields
+    /// LAG — observed live on 2026-07-27 reporting "Order picked up" while the
+    /// partner had already reached the door. `track_order` is Swiggy's actual
+    /// tracking endpoint ("PRIMARY TOOL for order tracking" per its own schema)
+    /// and carries the current two-line copy plus a poll cadence.
+    ///
+    /// `track_order` marks lat/lng required but keys off `orderId` — verified
+    /// that 0,0 returns the correct order — so we don't need real coordinates,
+    /// which `get_orders` doesn't expose anyway.
+    private func fetchInstamartOrders() async throws -> InstamartFetchOutcome {
         let result: InstamartOrdersResult = try await callTool(
             endpoint: instamartEndpoint,
             name: "get_orders",
             arguments: ["activeOnly": true]
         )
-        return result.orders.compactMap(Order.init(instamart:))
+
+        var orders: [Order] = []
+        var minInterval: TimeInterval?
+        var deliveredIds: Set<String> = []
+
+        for raw in result.orders where raw.isActive {
+            let tracking: InstamartTrackingRaw? = try? await callTool(
+                endpoint: instamartEndpoint,
+                name: "track_order",
+                arguments: ["orderId": raw.orderId, "lat": 0, "lng": 0]
+            )
+
+            // pollingIntervalSeconds == -1 is Swiggy saying "finished, stop
+            // polling". That's an explicit terminal signal — far better than
+            // inferring delivery from an order dropping out of the list.
+            if let secs = tracking?.pollingIntervalSeconds, secs < 0 {
+                deliveredIds.insert(raw.orderId)
+                continue
+            }
+            if let secs = tracking?.pollingIntervalSeconds, secs > 0 {
+                let asInterval = TimeInterval(secs)
+                minInterval = min(minInterval ?? asInterval, asInterval)
+            }
+
+            if let order = Order(instamart: raw, tracking: tracking) {
+                orders.append(order)
+            }
+        }
+
+        return InstamartFetchOutcome(
+            orders: orders,
+            minPollInterval: minInterval,
+            deliveredIds: deliveredIds
+        )
     }
 
     /// Live-tracking side-call for a single Food order. Returns the ETA text,
@@ -523,6 +604,29 @@ private struct InstamartItem: Decodable {
     let name: String
 }
 
+/// Response from Instamart's `track_order`. This is the live view — the
+/// status here leads `get_orders` by a stage or more.
+///
+/// Observed live 2026-07-27:
+///   mid-delivery → statusMessage "Arrived at location"
+///                  subStatusMessage "SIDDANNA GOWDA has reached your location"
+///                  pollingIntervalSeconds 30
+///   delivered    → statusMessage "Order Delivered"
+///                  subStatusMessage absent
+///                  pollingIntervalSeconds -1
+private struct InstamartTrackingRaw: Decodable {
+    struct StatusBlock: Decodable {
+        /// Headline status, e.g. "Arrived at location", "Order Delivered".
+        let statusMessage: String?
+        /// Partner-level detail, e.g. "SIDDANNA GOWDA has reached your location".
+        /// Absent in states with no partner attached yet, and once delivered.
+        let subStatusMessage: String?
+    }
+    let status: StatusBlock?
+    /// Swiggy's suggested cadence. `-1` means the order is finished.
+    let pollingIntervalSeconds: Int?
+}
+
 // MARK: - Raw → Order mappers
 //
 // These sit here (private extension) because they need access to the raw types
@@ -663,57 +767,71 @@ private extension Order {
         return phrase.isEmpty ? nil : phrase
     }
 
-    /// Build an Order from a raw Instamart response row. Returns nil if the
-    /// order isn't currently active.
-    init?(instamart raw: InstamartOrderRaw) {
+    /// Build an Order from an Instamart list row plus its live tracking data.
+    /// Returns nil if the order isn't currently active.
+    ///
+    /// **Two lines, both Swiggy's own words.** `track_order` returns a headline
+    /// and a partner-level detail, which map straight onto the row's bold
+    /// status line and the smaller line above it:
+    ///
+    ///     SIDDANNA GOWDA has reached your location   ← status.subStatusMessage
+    ///     Arrived at location                        ← status.statusMessage
+    ///
+    /// When there's no partner detail yet (early states) or it's gone
+    /// (delivered), the small line falls back to store • items so the row
+    /// still identifies which order it is.
+    ///
+    /// `get_orders`' own status fields are deliberately unused for display —
+    /// they lag `track_order` by a stage. They stay as the fallback for when
+    /// the tracking call fails.
+    init?(instamart raw: InstamartOrderRaw, tracking: InstamartTrackingRaw?) {
         guard raw.isActive else { return nil }
 
         let store = raw.storeName ?? "Instamart"
-        // Show all items where available (matches Food behaviour above).
         let itemNames = (raw.items ?? []).map { $0.name }
         let itemsLabel = itemNames.joined(separator: ", ")
-        let context = itemsLabel.isEmpty ? store : "\(store) • \(itemsLabel)"
+        let itemsContext = itemsLabel.isEmpty ? store : "\(store) • \(itemsLabel)"
+
+        // Headline: live tracking first, then get_orders' laggier fields.
+        let headline = tracking?.status?.statusMessage
+            ?? raw.statusMessage
+            ?? raw.currentStatus
+
+        // Small line: partner detail when Swiggy has one, else what was ordered.
+        let context = tracking?.status?.subStatusMessage ?? itemsContext
 
         // "13 mins" → 13. Anything unparseable → nil.
         let eta: Int? = raw.estimatedDeliveryTime
             .flatMap { $0.split(separator: " ").first }
             .flatMap { Int($0) }
 
-        // Progress inferred from keywords in `currentStatus`. Order matters:
-        // "delivered" wins over "picked up" (a delivered order has been both).
-        // Kept stepwise (not ETA-interpolated like Food) because Instamart
-        // doesn't ship a live-decrementing ETA — `get_orders` returns a static
-        // "13 mins" style string, so there's no smooth signal to interpolate.
-        // The bar still animates between stages thanks to the spring in
-        // ProgressBarView; the underlying value just jumps between milestones.
-        let cs = raw.currentStatus.lowercased()
+        // Progress from the headline's keywords. Ordered most-complete first,
+        // since a delivered order has also been picked up.
+        //
+        // Stepwise rather than ETA-interpolated like Food: Instamart's ETA is
+        // a static string from get_orders, not a live countdown, so there's no
+        // smooth signal to interpolate. ProgressBarView's spring still animates
+        // the jumps between stages.
+        let s = headline.lowercased()
         let progressFraction: Double
-        if cs.contains("delivered") {
+        if s.contains("delivered") {
             progressFraction = ProgressStage.delivered.fraction
-        } else if cs.contains("nearby") || cs.contains("minutes away") || cs.contains("arriving") {
+        } else if s.contains("arrived") || s.contains("reached") || s.contains("nearby")
+                    || s.contains("minutes away") || s.contains("arriving") {
             progressFraction = ProgressStage.nearby.fraction
-        } else if cs.contains("picked up") || cs.contains("on the way") || cs.contains("out for delivery") {
+        } else if s.contains("picked up") || s.contains("on the way") || s.contains("out for delivery") {
             progressFraction = ProgressStage.inTransit.fraction
-        } else if cs.contains("packed") {
+        } else if s.contains("packed") {
             progressFraction = ProgressStage.packed.fraction
-        } else if cs.contains("confirmed") || cs.contains("received") {
-            progressFraction = ProgressStage.placed.fraction
         } else {
             progressFraction = ProgressStage.placed.fraction
         }
 
-        // Swiggy ships two status strings on Instamart orders:
-        //   • currentStatus — terse label, e.g. "Order picked up"
-        //   • statusMessage — conversational, delivery-partner-aware,
-        //                     e.g. "DAVAL SAB has picked up your order"
-        // We prefer the conversational one (matches iOS app copy), fall
-        // back to currentStatus when it's absent. Same pattern as Food's
-        // track_food_order → invented-label fallback.
         self.init(
             id: raw.orderId,
             platform: .instamart,
             context: context,
-            status: raw.statusMessage ?? raw.currentStatus,
+            status: headline,
             eta: eta,
             progress: progressFraction
         )

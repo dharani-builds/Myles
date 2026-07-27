@@ -168,7 +168,11 @@ final class OrdersPoller {
 
         do {
             let result = try await client.fetchActiveOrders()
-            state.setLoaded(result.orders)
+            state.setLoaded(
+                result.orders,
+                failedPlatforms: result.failedPlatforms,
+                deliveredOrderIds: result.deliveredOrderIds
+            )
             hasEverPolled = true
             lastPollCompletedAt = Date()
 

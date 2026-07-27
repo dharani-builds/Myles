@@ -1,7 +1,7 @@
 import Foundation
 
 /// Which Swiggy vertical the order belongs to. Drives badge color + progress hue.
-enum OrderPlatform: Equatable {
+enum OrderPlatform: Equatable, Hashable, CaseIterable {
     case food
     case instamart
 }

@@ -99,7 +99,8 @@
       "Bash(chmod +x scripts/make-dmg.sh)",
       "Bash(./scripts/make-dmg.sh)",
       "Bash(bash -x ./scripts/make-dmg.sh)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "mcp__swiggy-instamart__track_order"
     ]
   }
 }

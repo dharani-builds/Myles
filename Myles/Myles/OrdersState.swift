@@ -50,9 +50,22 @@ final class OrdersState {
     /// to the empty state. 60s per design.
     static let celebrationDuration: TimeInterval = 60
 
-    /// Order IDs from the previous successful poll. Used to detect the
-    /// active → empty transition that triggers the celebration.
+    /// Order IDs seen on the previous poll, plus any confirmed delivered that
+    /// cycle. Used to tell "an order we were tracking just finished" apart from
+    /// "an order we never saw is being reported as finished".
     private var previousOrderIds: Set<String> = []
+
+    /// Last orders we actually displayed. Used to carry a platform's orders
+    /// forward when that platform's fetch fails, so a blip doesn't blank a
+    /// live order out of the popover.
+    private var lastKnownOrders: [Order] = []
+
+    /// When each platform last returned successfully. Bounds the carry-forward
+    /// above: a platform that's been failing for longer than
+    /// `staleCarryForwardLimit` stops having its orders shown, so a persistent
+    /// outage can't leave a phantom order pinned in the popover forever.
+    private var platformLastSuccess: [OrderPlatform: Date] = [:]
+    private let staleCarryForwardLimit: TimeInterval = 300
 
     /// Sleeper task that clears `celebrationStartedAt` after 60s. Cancelled
     /// (and replaced) when a new celebration begins, or when a new active
@@ -83,21 +96,51 @@ final class OrdersState {
 
     // MARK: - Mutation (called by the poller, or by fixtures during dev)
 
-    func setLoaded(_ orders: [Order]) {
-        let newIds = Set(orders.map(\.id))
+    /// Apply a poll result.
+    ///
+    /// - `failedPlatforms`: platforms whose fetch threw. Their absence from
+    ///   `orders` means "we don't know", not "nothing there" — so we carry
+    ///   their last-known orders forward and never celebrate on their behalf.
+    /// - `deliveredOrderIds`: orders Swiggy explicitly confirmed complete.
+    ///   Only these earn the celebration.
+    func setLoaded(
+        _ orders: [Order],
+        failedPlatforms: Set<OrderPlatform> = [],
+        deliveredOrderIds: Set<String> = []
+    ) {
+        let now = Date()
+        for platform in OrderPlatform.allCases where !failedPlatforms.contains(platform) {
+            platformLastSuccess[platform] = now
+        }
 
-        // Celebration state transitions:
-        //   • non-empty → empty  ⇒ orders just delivered → start celebration
-        //   • empty     → empty  ⇒ leave celebrationStartedAt alone (expiring)
-        //   • any       → non-empty ⇒ clear (Q3: new active order overrides)
-        if !newIds.isEmpty {
-            endCelebration()
-        } else if !previousOrderIds.isEmpty {
+        // Keep showing what we last knew for any platform that failed this
+        // cycle, so a transient error doesn't blank out a live order — but
+        // only while that failure is still plausibly transient.
+        var merged = orders
+        if !failedPlatforms.isEmpty {
+            let stale = lastKnownOrders.filter { order in
+                guard failedPlatforms.contains(order.platform) else { return false }
+                guard let lastOK = platformLastSuccess[order.platform] else { return false }
+                return now.timeIntervalSince(lastOK) < staleCarryForwardLimit
+            }
+            merged.append(contentsOf: stale)
+        }
+
+        // Celebrate only on positive confirmation from Swiggy. An order simply
+        // vanishing from the list is not enough — it also happens on cancels,
+        // transient empty responses, and (before this guard existed) whenever
+        // one platform errored while the other returned nothing.
+        let confirmedFinish = deliveredOrderIds.contains { previousOrderIds.contains($0) }
+        if !merged.isEmpty {
+            endCelebration()          // a live order always outranks the celebration
+        } else if confirmedFinish {
             beginCelebration()
         }
-        previousOrderIds = newIds
 
-        status = orders.isEmpty ? .empty : .loaded(orders)
+        previousOrderIds = Set(merged.map(\.id)).union(deliveredOrderIds)
+        lastKnownOrders = merged
+
+        status = merged.isEmpty ? .empty : .loaded(merged)
         lastUpdated = Date()
         consecutiveErrorCount = 0
         hadOrdersAtErrorStart = false
@@ -164,6 +207,8 @@ final class OrdersState {
         hadOrdersAtErrorStart = false
         endCelebration()
         previousOrderIds = []
+        lastKnownOrders = []
+        platformLastSuccess = [:]
     }
 
     // MARK: - Helpers
