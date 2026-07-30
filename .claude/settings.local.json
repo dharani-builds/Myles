@@ -103,7 +103,9 @@
       "mcp__swiggy-instamart__track_order",
       "Bash(git rebase *)",
       "Bash(git stash *)",
-      "mcp__swiggy-instamart__get_delivery_status"
+      "mcp__swiggy-instamart__get_delivery_status",
+      "mcp__visualize__read_me",
+      "mcp__visualize__show_widget"
     ]
   }
 }

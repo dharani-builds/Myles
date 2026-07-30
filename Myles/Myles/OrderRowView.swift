@@ -13,21 +13,6 @@ import SwiftUI
 struct OrderRowView: View {
     let order: Order
 
-    /// EXPERIMENT — two candidate treatments for the secondary text line when
-    /// Swiggy gives us a delivery-partner detail (Instamart only). Being
-    /// compared side by side in previews before one gets picked; the loser
-    /// and this enum both go away afterwards.
-    enum SecondaryLineStyle {
-        /// Both, stacked: items line, headline, then partner detail below.
-        /// Costs a third line of height for the whole delivery.
-        case threeLine
-        /// One slot, contents depend on the stage: items while the order is
-        /// still being put together, partner detail once it's en route — on
-        /// the theory that what's useful shifts when the order starts moving.
-        case swapWhenEnRoute
-    }
-    var secondaryLineStyle: SecondaryLineStyle = .swapWhenEnRoute
-
     /// Hide the ETA badge when Swiggy explicitly stops estimating — that
     /// happens once the partner is standing at the user's door and the
     /// remaining time is meaningless. Detected via keyword match on the
@@ -51,25 +36,24 @@ struct OrderRowView: View {
         .animation(.spring(response: 0.5, dampingFraction: 0.85), value: showsETABadge)
     }
 
-    /// Text shown above the headline. In `swapWhenEnRoute` this becomes the
-    /// partner detail once the order is moving; otherwise it's always what
-    /// was ordered.
+    /// The small line above the headline, which changes with the stage:
+    /// what was ordered while it's still being put together, then the
+    /// delivery-partner detail once it's moving.
+    ///
+    /// The reasoning: before dispatch nothing is happening yet, so the
+    /// contents are the only useful thing to show. Once it's en route the
+    /// live question is who has it and where they are, and the items stop
+    /// earning the space. Because the headline changes at the same moment,
+    /// the swap reads as the row entering a new state rather than as the
+    /// items going missing.
+    ///
+    /// Food always falls through to `context` — its MCP exposes no partner
+    /// info, so `partnerDetail` is nil there.
     private var topLine: String {
-        switch secondaryLineStyle {
-        case .threeLine:
-            return order.context
-        case .swapWhenEnRoute:
-            if order.isEnRoute, let detail = order.partnerDetail {
-                return detail
-            }
-            return order.context
+        if order.isEnRoute, let detail = order.partnerDetail {
+            return detail
         }
-    }
-
-    /// Only `threeLine` renders a partner detail below the headline.
-    private var bottomLine: String? {
-        guard case .threeLine = secondaryLineStyle else { return nil }
-        return order.partnerDetail
+        return order.context
     }
 
     private var leftColumn: some View {
@@ -89,15 +73,6 @@ struct OrderRowView: View {
                     .lineSpacing(4)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
-                if let bottomLine {
-                    Text(bottomLine)
-                        .font(.system(size: 11, weight: .regular))
-                        .foregroundStyle(Color.textTertiary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(height: 14)
-                        .padding(.top, 2)
-                }
             }
             ProgressBarView(progress: order.progress)
         }
