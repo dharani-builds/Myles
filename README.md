@@ -2,6 +2,7 @@
 
 Myles is a menubar app that helps you track your food and instamart orders. You don't have to open your phone each time to check the status of your order. Log in once with your mobile number and it's there in the menu bar.
 
+<img width="739" height="221" alt="Screenshot 2026-07-28 at 10 02 01 AM" src="https://github.com/user-attachments/assets/0120b798-cd9b-4664-9aaa-f52850ca9d27" />
 
 
 ## Why I built this
