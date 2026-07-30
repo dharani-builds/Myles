@@ -15,13 +15,15 @@ struct OrderRowView: View {
 
     /// Hide the ETA badge once there's no meaningful time left to show.
     ///
-    /// Swiggy nulls the deliver-by time when the partner reaches the door, so
-    /// an en-route order with no ETA has genuinely arrived — a badge there
-    /// would read as a broken tracker. A missing ETA *before* dispatch is a
-    /// different thing: that's us not knowing yet, which "—" states honestly.
+    /// Swiggy nulls the deliver-by time when the partner reaches the address,
+    /// so a missing ETA *there* is real and a badge would read as a broken
+    /// tracker. Keyed on `hasArrived` rather than `isEnRoute` on purpose:
+    /// Swiggy's live-status endpoint times out often enough that a mid-delivery
+    /// poll can come back with no ETA, and hiding on that would make the badge
+    /// blink out and back as polls fail and recover.
     /// When hidden, the left column expands to fill the row.
     private var showsETABadge: Bool {
-        !(order.eta == nil && order.isEnRoute)
+        !(order.eta == nil && order.hasArrived)
     }
 
     var body: some View {

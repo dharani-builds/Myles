@@ -30,6 +30,14 @@ struct Order: Identifiable, Equatable {
     /// Views use this to decide whether `context` or `partnerDetail` is the
     /// more useful thing to surface in the row's secondary line.
     let isEnRoute: Bool
+    /// True only when Swiggy says the partner has actually reached the address.
+    ///
+    /// Deliberately narrower than `isEnRoute`. Swiggy stops reporting a
+    /// deliver-by time on arrival, so a missing ETA there is meaningful and
+    /// the badge should go — but a missing ETA merely because the live-status
+    /// call timed out mid-delivery means nothing, and hiding the badge on that
+    /// makes it flicker in and out as polls succeed and fail.
+    let hasArrived: Bool
     /// ETA in minutes. Nil if the order has no meaningful ETA.
     let eta: Int?
     /// Progress fraction, 0.0 – 1.0, interpolated from remaining ETA on both
@@ -43,6 +51,7 @@ struct Order: Identifiable, Equatable {
         status: String,
         partnerDetail: String? = nil,
         isEnRoute: Bool = false,
+        hasArrived: Bool = false,
         eta: Int?,
         progress: Double
     ) {
@@ -52,6 +61,7 @@ struct Order: Identifiable, Equatable {
         self.status = status
         self.partnerDetail = partnerDetail
         self.isEnRoute = isEnRoute
+        self.hasArrived = hasArrived
         self.eta = eta
         self.progress = progress
     }

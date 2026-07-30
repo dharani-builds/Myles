@@ -824,6 +824,7 @@ private extension Order {
             status: statusLabel,
             partnerDetail: nil,
             isEnRoute: isEnRoute,
+            hasArrived: Order.phraseImpliesArrived(statusLabel),
             eta: remainingMinutes,
             progress: progressFraction
         )
@@ -836,9 +837,17 @@ private extension Order {
     fileprivate static func phraseImpliesEnRoute(_ phrase: String) -> Bool {
         let s = phrase.lowercased()
         return s.contains("picked up") || s.contains("on the way")
-            || s.contains("out for delivery") || s.contains("arrived")
-            || s.contains("reached") || s.contains("nearby")
-            || s.contains("minutes away") || s.contains("arriving")
+            || s.contains("out for delivery") || s.contains("arriving")
+            || s.contains("nearby") || s.contains("minutes away")
+            || phraseImpliesArrived(phrase)
+    }
+
+    /// Narrower than the above: the partner is at the address, not just moving
+    /// toward it. Observed phrases — Food "Arrived at location", Instamart
+    /// "Arrived at location" / "…has reached your location".
+    fileprivate static func phraseImpliesArrived(_ phrase: String) -> Bool {
+        let s = phrase.lowercased()
+        return s.contains("arrived") || s.contains("reached")
     }
 
     /// Continuous ETA-to-progress mapping. See init?(food:status:) for the
@@ -966,6 +975,7 @@ private extension Order {
             status: headline,
             partnerDetail: tracking?.status?.subStatusMessage,
             isEnRoute: isEnRoute,
+            hasArrived: Order.phraseImpliesArrived(headline),
             eta: eta,
             progress: progressFraction
         )

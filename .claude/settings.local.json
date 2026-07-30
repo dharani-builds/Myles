@@ -109,7 +109,8 @@
       "Bash(sed -n '/struct FoodDeliveryStatus/,/^}/p' MCPClient.swift)",
       "Bash(sed -n '/struct InstamartOrdersResult/,/^}/p' MCPClient.swift)",
       "Bash(sed -n '/struct InstamartOrderRaw/,/^}/p' MCPClient.swift)",
-      "Bash(sed -n '/struct FoodOrdersResult/,/^}/p' MCPClient.swift)"
+      "Bash(sed -n '/struct FoodOrdersResult/,/^}/p' MCPClient.swift)",
+      "mcp__swiggy-food__get_food_delivery_status"
     ]
   }
 }
