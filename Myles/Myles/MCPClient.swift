@@ -33,6 +33,17 @@ final class MCPClient {
     /// echoed on subsequent requests. Cached here; nil until the server gives us one.
     private var sessionId: String?
 
+    /// Longest ETA we've ever seen for each order, keyed by orderId.
+    ///
+    /// This is what the progress bar is measured against. A fixed ceiling can't
+    /// work: anchoring to a constant 45 minutes meant a 25-minute order opened
+    /// at ~47% because `1 - 24/45` says so. Anchoring to the order's own peak
+    /// means the first observation reads as 0% and it fills from there,
+    /// regardless of whether the order takes 12 minutes or 50.
+    ///
+    /// Pruned each poll so it can't grow past the active set.
+    private var peakETAByOrder: [String: Int] = [:]
+
     /// Any valid Swiggy addressId, cached for the app's lifetime.
     /// `get_food_orders` demands one via schema; the value doesn't affect which
     /// active orders come back, so we fetch once and reuse.
@@ -111,14 +122,39 @@ final class MCPClient {
         // At least one platform succeeded — return partial data, but tell the
         // caller which platform (if any) failed so it doesn't read the gap as
         // "those orders are gone".
+        let allOrders = (foodOutcome?.orders ?? []) + (instaOutcome?.orders ?? [])
+
+        // Only prune when both platforms answered — otherwise a failed platform
+        // would look like it has no orders and we'd throw away the progress
+        // anchors for orders that are still very much in flight.
+        if failed.isEmpty {
+            prunePeakETAs(keeping: Set(allOrders.map(\.id)))
+        }
+
         let intervals = [foodOutcome?.minPollInterval, instaOutcome?.minPollInterval].compactMap { $0 }
         return FetchResult(
-            orders: (foodOutcome?.orders ?? []) + (instaOutcome?.orders ?? []),
+            orders: allOrders,
             suggestedPollInterval: intervals.min(),
             failedPlatforms: failed,
             deliveredOrderIds: (foodOutcome?.deliveredIds ?? []).union(instaOutcome?.deliveredIds ?? []),
             cancelledOrderIds: (foodOutcome?.cancelledIds ?? []).union(instaOutcome?.cancelledIds ?? [])
         )
+    }
+
+    /// Record this order's ETA and return the peak to measure progress against.
+    /// Nil ETA leaves the peak untouched — a poll that couldn't fetch a time
+    /// shouldn't be able to reset the anchor.
+    private func peakETA(forOrder id: String, currentETA: Int?) -> Int? {
+        if let mins = currentETA {
+            peakETAByOrder[id] = max(peakETAByOrder[id] ?? mins, mins)
+        }
+        return peakETAByOrder[id]
+    }
+
+    /// Drop anchors for orders that are no longer active, so the dictionary
+    /// stays the size of the active set rather than growing all session.
+    private func prunePeakETAs(keeping activeIds: Set<String>) {
+        peakETAByOrder = peakETAByOrder.filter { activeIds.contains($0.key) }
     }
 
     // MARK: - Per-platform fetches
@@ -232,7 +268,16 @@ final class MCPClient {
                 cancelledIds.insert(raw.orderId)
                 continue
             }
-            if let order = Order(food: raw, status: status, trackText: trackText) {
+            let liveMinutes = Order.minutesRemaining(
+                deliveryBy: status?.deliveryBy,
+                serverNow: status?.serverNow
+            )
+            if let order = Order(
+                food: raw,
+                status: status,
+                trackText: trackText,
+                peakETA: peakETA(forOrder: raw.orderId, currentETA: liveMinutes)
+            ) {
                 orders.append(order)
             }
             if let sec = status?.pollIntervalSec {
@@ -315,7 +360,16 @@ final class MCPClient {
                 minInterval = min(minInterval ?? asInterval, asInterval)
             }
 
-            if let order = Order(instamart: raw, tracking: tracking, live: live) {
+            let liveMinutes = Order.minutesRemaining(
+                deliveryBy: live?.deliveryBy,
+                serverNow: live?.serverNow
+            )
+            if let order = Order(
+                instamart: raw,
+                tracking: tracking,
+                live: live,
+                peakETA: peakETA(forOrder: raw.orderId, currentETA: liveMinutes)
+            ) {
                 orders.append(order)
             }
         }
@@ -743,7 +797,12 @@ private extension Order {
     ///   We parse the middle phrase and use it as the status label when
     ///   available — that's Swiggy's real user-facing copy. Otherwise we
     ///   fall back to the ETA-bucketed labels we invent locally.
-    init?(food raw: FoodOrderRaw, status: FoodDeliveryStatus?, trackText: String? = nil) {
+    init?(
+        food raw: FoodOrderRaw,
+        status: FoodDeliveryStatus?,
+        trackText: String? = nil,
+        peakETA: Int? = nil
+    ) {
         guard raw.isActiveOrder else { return nil }
 
         // Multi-item context.
@@ -780,11 +839,10 @@ private extension Order {
         // terminal state) — which is exactly when the ETA badge should vanish
         // rather than sit on a stale number.
         let statusLabel: String
-        let remainingMinutes: Int? = {
-            guard let by = status?.deliveryBy, let now = status?.serverNow else { return nil }
-            let deltaMs = max(0, by - now)
-            return Int((Double(deltaMs) / 60_000.0).rounded())
-        }()
+        let remainingMinutes = Order.minutesRemaining(
+            deliveryBy: status?.deliveryBy,
+            serverNow: status?.serverNow
+        )
 
         // Swiggy's own conversational phrase (if we got it) beats any label
         // we might invent — it's the same copy shown in the iOS Live Activity.
@@ -801,7 +859,7 @@ private extension Order {
             rawProgress = 1.0
             statusLabel = swiggyPhrase ?? "Order delivered!"
         case "processing":
-            rawProgress = Self.foodProgressFromETA(remainingMinutes)
+            rawProgress = Self.progressFromETA(remaining: remainingMinutes, peak: peakETA) ?? 0.10
             if let phrase = swiggyPhrase ?? status?.statusText {
                 statusLabel = phrase
             } else if let mins = remainingMinutes, mins <= 3 {
@@ -884,14 +942,34 @@ private extension Order {
         return s.contains("arrived") || s.contains("reached")
     }
 
-    /// Continuous ETA-to-progress mapping. See init?(food:status:) for the
-    /// design notes. Extracted so it's easy to swap the curve later without
-    /// hunting through the switch.
-    private static func foodProgressFromETA(_ mins: Int?) -> Double {
-        guard let mins = mins, mins >= 0 else { return 0.20 }
-        let maxETA: Double = 45
-        let raw = 1.0 - min(Double(mins), maxETA) / maxETA
-        return min(0.97, max(0.20, raw))
+    /// How far through the delivery we are, measured against this order's own
+    /// longest-seen ETA rather than a fixed assumption about order length.
+    ///
+    /// `1 - remaining/peak`, so the first reading is 0 and it fills as the ETA
+    /// counts down. Works the same for a 12-minute Instamart run and a
+    /// 50-minute Food order, which a constant ceiling could never do.
+    ///
+    /// Floor of 0.03 keeps a sliver visible rather than an empty track; ceiling
+    /// of 0.97 leaves headroom for a distinct 100% at delivery.
+    ///
+    /// Caveat: if the app starts mid-delivery it has no memory of the original
+    /// ETA, so the peak is whatever it first sees and the bar reads lower than
+    /// reality until the order progresses. Preferred over the alternative, where
+    /// every short order overstated its progress from the outset.
+    /// Minutes left, from Swiggy's own clock pair. Using `deliveryBy - serverNow`
+    /// rather than the local clock keeps this immune to device clock drift.
+    /// Nil whenever either field is absent — which is Swiggy's way of saying
+    /// there's no time left to report.
+    fileprivate static func minutesRemaining(deliveryBy: Int64?, serverNow: Int64?) -> Int? {
+        guard let deliveryBy, let serverNow else { return nil }
+        let deltaMs = max(0, deliveryBy - serverNow)
+        return Int((Double(deltaMs) / 60_000.0).rounded())
+    }
+
+    fileprivate static func progressFromETA(remaining: Int?, peak: Int?) -> Double? {
+        guard let remaining, let peak, peak > 0, remaining >= 0 else { return nil }
+        let raw = 1.0 - (Double(min(remaining, peak)) / Double(peak))
+        return min(0.97, max(0.03, raw))
     }
 
     /// Extract Swiggy's conversational status phrase from the
@@ -945,7 +1023,8 @@ private extension Order {
     init?(
         instamart raw: InstamartOrderRaw,
         tracking: InstamartTrackingRaw?,
-        live: InstamartDeliveryStatus?
+        live: InstamartDeliveryStatus?,
+        peakETA: Int? = nil
     ) {
         // Treat a missing `isActive` as active — the caller only passes rows
         // from an activeOnly query, so absence means "field not sent", not
@@ -976,11 +1055,10 @@ private extension Order {
         //
         // The static string is only used when the live call failed outright,
         // where a frozen number beats no number at all.
-        let liveMinutes: Int? = {
-            guard let by = live?.deliveryBy, let now = live?.serverNow else { return nil }
-            let deltaMs = max(0, by - now)
-            return Int((Double(deltaMs) / 60_000.0).rounded())
-        }()
+        let liveMinutes = Order.minutesRemaining(
+            deliveryBy: live?.deliveryBy,
+            serverNow: live?.serverNow
+        )
         let staticMinutes: Int? = raw.estimatedDeliveryTime
             .flatMap { $0.split(separator: " ").first }
             .flatMap { Int($0) }
@@ -997,7 +1075,9 @@ private extension Order {
         let progressFraction: Double = {
             if s.contains("delivered") { return 1.0 }
             if hasArrived { return 0.97 }
-            if liveMinutes != nil { return Self.instamartProgressFromETA(liveMinutes) }
+            if let fromETA = Self.progressFromETA(remaining: liveMinutes, peak: peakETA) {
+                return fromETA
+            }
             if isEnRoute { return ProgressStage.inTransit.fraction }
             if s.contains("packed") { return ProgressStage.packed.fraction }
             return ProgressStage.placed.fraction
@@ -1016,14 +1096,6 @@ private extension Order {
         )
     }
 
-    /// Instamart deliveries are much shorter than Food, so the ETA-to-progress
-    /// curve is scaled to a 20-minute ceiling rather than Food's 45.
-    private static func instamartProgressFromETA(_ mins: Int?) -> Double {
-        guard let mins = mins, mins >= 0 else { return 0.20 }
-        let maxETA: Double = 20
-        let raw = 1.0 - min(Double(mins), maxETA) / maxETA
-        return min(0.97, max(0.20, raw))
-    }
 }
 
 // MARK: - MCP capture log (forensic JSONL for post-order analysis)
