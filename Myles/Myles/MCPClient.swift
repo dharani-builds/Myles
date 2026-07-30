@@ -644,6 +644,11 @@ private struct FoodDeliveryStatus: Decodable {
     /// local clock so device drift can't skew the countdown.
     let serverNow: Int64?
     let etaText: String?      // Human copy, e.g. "2 mins". Nil close to arrival.
+    /// Status phrase, e.g. "Arrived at location". Sent only in some states —
+    /// absent 15 minutes earlier on the same order, present on arrival — so
+    /// it's a fallback behind `track_food_order`'s prose rather than the
+    /// primary source.
+    let statusText: String?
     /// Optional for the same reason as `deliveryBy` — one missing field must
     /// not cost us the whole payload.
     let cancelled: Bool?
@@ -790,14 +795,14 @@ private extension Order {
         // ("Preparing your order", "Out for delivery") so the user can't tell
         // whether the fallback fired or not. Kept in sync with the iOS
         // Live Activity copy.
-        let progressFraction: Double
+        let rawProgress: Double
         switch raw.orderStatus.lowercased() {
         case "delivered":
-            progressFraction = 1.0
+            rawProgress = 1.0
             statusLabel = swiggyPhrase ?? "Order delivered!"
         case "processing":
-            progressFraction = Self.foodProgressFromETA(remainingMinutes)
-            if let phrase = swiggyPhrase {
+            rawProgress = Self.foodProgressFromETA(remainingMinutes)
+            if let phrase = swiggyPhrase ?? status?.statusText {
                 statusLabel = phrase
             } else if let mins = remainingMinutes, mins <= 3 {
                 statusLabel = "Arriving soon"
@@ -808,7 +813,7 @@ private extension Order {
             }
         default:
             // "just placed" state before Swiggy flips to processing.
-            progressFraction = 0.10
+            rawProgress = 0.10
             statusLabel = swiggyPhrase ?? "Order received"
         }
 
@@ -816,6 +821,7 @@ private extension Order {
         // secondary line shows — but it does let the row hide a meaningless
         // ETA badge on arrival, the same way Instamart does.
         let isEnRoute = Order.phraseImpliesEnRoute(statusLabel)
+        let hasArrived = Order.phraseImpliesArrived(statusLabel)
 
         self.init(
             id: raw.orderId,
@@ -824,10 +830,38 @@ private extension Order {
             status: statusLabel,
             partnerDetail: nil,
             isEnRoute: isEnRoute,
-            hasArrived: Order.phraseImpliesArrived(statusLabel),
+            hasArrived: hasArrived,
             eta: remainingMinutes,
-            progress: progressFraction
+            progress: Order.progressFloor(
+                rawProgress,
+                hasETA: remainingMinutes != nil,
+                isEnRoute: isEnRoute,
+                hasArrived: hasArrived
+            )
         )
+    }
+
+    /// Keep the bar honest when there's no ETA to interpolate from.
+    ///
+    /// The ETA curves bottom out at 0.20 for a nil input, which is right for an
+    /// order that hasn't been estimated yet — and badly wrong at the other end
+    /// of the delivery. Swiggy nulls the deliver-by time on arrival, so without
+    /// this the bar climbed to ~95% and then snapped back to 20% at the exact
+    /// moment the food turned up. A timed-out live-status call did the same
+    /// thing mid-delivery.
+    ///
+    /// So when the ETA is missing, fall back to the stage instead of the floor.
+    /// With an ETA present the curve is trusted as-is.
+    fileprivate static func progressFloor(
+        _ raw: Double,
+        hasETA: Bool,
+        isEnRoute: Bool,
+        hasArrived: Bool
+    ) -> Double {
+        guard !hasETA else { return raw }
+        if hasArrived { return 0.97 }
+        if isEnRoute { return max(raw, ProgressStage.inTransit.fraction) }
+        return raw
     }
 
     /// Shared keyword test for "the order has left the store". Swiggy exposes
@@ -954,15 +988,16 @@ private extension Order {
 
         let s = headline.lowercased()
         let isEnRoute = Order.phraseImpliesEnRoute(headline)
+        let hasArrived = Order.phraseImpliesArrived(headline)
 
-        // Progress now interpolates from the live ETA, same as Food — the
-        // keyword-to-stage guessing this replaced only existed because there
-        // was no ticking ETA to interpolate from.
+        // Interpolates from the live ETA, same as Food. The stage anchors below
+        // only cover the case where there's no live ETA at all — note arrival is
+        // checked before them, since Swiggy nulls the deliver-by time there and
+        // the raw curve would otherwise bottom out at its 20% floor.
         let progressFraction: Double = {
             if s.contains("delivered") { return 1.0 }
+            if hasArrived { return 0.97 }
             if liveMinutes != nil { return Self.instamartProgressFromETA(liveMinutes) }
-            // No live ETA (call failed) — fall back to coarse stage anchors so
-            // the bar still reflects roughly where the order is.
             if isEnRoute { return ProgressStage.inTransit.fraction }
             if s.contains("packed") { return ProgressStage.packed.fraction }
             return ProgressStage.placed.fraction
@@ -975,7 +1010,7 @@ private extension Order {
             status: headline,
             partnerDetail: tracking?.status?.subStatusMessage,
             isEnRoute: isEnRoute,
-            hasArrived: Order.phraseImpliesArrived(headline),
+            hasArrived: hasArrived,
             eta: eta,
             progress: progressFraction
         )
