@@ -15,17 +15,46 @@ enum OrderPlatform: Equatable, Hashable, CaseIterable {
 struct Order: Identifiable, Equatable {
     let id: String
     let platform: OrderPlatform
-    /// Context line — restaurant/store name + primary item, joined with " • ".
-    /// e.g. "Truffles • Grilled Fish in Lemon Butter Sauce"
+    /// What was ordered — store/restaurant name + items, joined with " • ".
+    /// e.g. "Truffles • Grilled Fish in Lemon Butter Sauce". This identifies
+    /// the order; it never changes over the order's life.
     let context: String
     /// Human-friendly status headline. e.g. "Order Received", "Out for delivery"
     let status: String
+    /// Delivery-partner detail from Swiggy, when there is one — e.g.
+    /// "SIDDANNA GOWDA has reached your location". Instamart only today
+    /// (`track_order`'s `subStatusMessage`); Food's MCP exposes no partner
+    /// info at all, so it's always nil there.
+    let partnerDetail: String?
+    /// True once the order has left the store and is en route to the user.
+    /// Views use this to decide whether `context` or `partnerDetail` is the
+    /// more useful thing to surface in the row's secondary line.
+    let isEnRoute: Bool
     /// ETA in minutes. Nil if the order has no meaningful ETA.
     let eta: Int?
-    /// Progress fraction, 0.0 – 1.0. Continuously interpolated for Food
-    /// (based on remaining ETA), stepwise for Instamart (keyword-mapped).
-    /// The bar itself is spring-animated so any change slides smoothly.
+    /// Progress fraction, 0.0 – 1.0, interpolated from remaining ETA on both
+    /// platforms. The bar is spring-animated so any change slides smoothly.
     let progress: Double
+
+    init(
+        id: String,
+        platform: OrderPlatform,
+        context: String,
+        status: String,
+        partnerDetail: String? = nil,
+        isEnRoute: Bool = false,
+        eta: Int?,
+        progress: Double
+    ) {
+        self.id = id
+        self.platform = platform
+        self.context = context
+        self.status = status
+        self.partnerDetail = partnerDetail
+        self.isEnRoute = isEnRoute
+        self.eta = eta
+        self.progress = progress
+    }
 }
 
 /// Milestone anchors kept as an enum for referenceability in code + fixtures.

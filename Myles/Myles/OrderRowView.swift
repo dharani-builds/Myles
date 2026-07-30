@@ -13,6 +13,21 @@ import SwiftUI
 struct OrderRowView: View {
     let order: Order
 
+    /// EXPERIMENT — two candidate treatments for the secondary text line when
+    /// Swiggy gives us a delivery-partner detail (Instamart only). Being
+    /// compared side by side in previews before one gets picked; the loser
+    /// and this enum both go away afterwards.
+    enum SecondaryLineStyle {
+        /// Both, stacked: items line, headline, then partner detail below.
+        /// Costs a third line of height for the whole delivery.
+        case threeLine
+        /// One slot, contents depend on the stage: items while the order is
+        /// still being put together, partner detail once it's en route — on
+        /// the theory that what's useful shifts when the order starts moving.
+        case swapWhenEnRoute
+    }
+    var secondaryLineStyle: SecondaryLineStyle = .swapWhenEnRoute
+
     /// Hide the ETA badge when Swiggy explicitly stops estimating — that
     /// happens once the partner is standing at the user's door and the
     /// remaining time is meaningless. Detected via keyword match on the
@@ -36,10 +51,31 @@ struct OrderRowView: View {
         .animation(.spring(response: 0.5, dampingFraction: 0.85), value: showsETABadge)
     }
 
+    /// Text shown above the headline. In `swapWhenEnRoute` this becomes the
+    /// partner detail once the order is moving; otherwise it's always what
+    /// was ordered.
+    private var topLine: String {
+        switch secondaryLineStyle {
+        case .threeLine:
+            return order.context
+        case .swapWhenEnRoute:
+            if order.isEnRoute, let detail = order.partnerDetail {
+                return detail
+            }
+            return order.context
+        }
+    }
+
+    /// Only `threeLine` renders a partner detail below the headline.
+    private var bottomLine: String? {
+        guard case .threeLine = secondaryLineStyle else { return nil }
+        return order.partnerDetail
+    }
+
     private var leftColumn: some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(order.context)
+                Text(topLine)
                     .font(.system(size: 11, weight: .regular))
                     .foregroundStyle(Color.textTertiary)
                     .lineLimit(1)
@@ -53,6 +89,15 @@ struct OrderRowView: View {
                     .lineSpacing(4)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
+                if let bottomLine {
+                    Text(bottomLine)
+                        .font(.system(size: 11, weight: .regular))
+                        .foregroundStyle(Color.textTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(height: 14)
+                        .padding(.top, 2)
+                }
             }
             ProgressBarView(progress: order.progress)
         }

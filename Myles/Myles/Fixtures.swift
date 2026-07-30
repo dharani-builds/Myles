@@ -55,6 +55,40 @@ enum Fixtures {
         progress: ProgressStage.nearby.fraction
     )
 
+    // MARK: - Secondary-line comparison
+    //
+    // Both taken verbatim from the live 2026-07-27 Instamart capture, so the
+    // layout comparison uses real string lengths rather than invented ones.
+
+    /// Before the order leaves the store — no partner attached yet, so there's
+    /// nothing to swap in and both treatments should look identical.
+    static let instamartBeforeDispatch = Order(
+        id: "fixture-im-pre-dispatch",
+        platform: .instamart,
+        context: "Instamart • NOICE Chocolate Nougat Barks, Minimalist Vitamin B5 10% Oil Free Moisturizer",
+        status: "Order Confirmed!",
+        partnerDetail: nil,
+        isEnRoute: false,
+        eta: 8,
+        progress: 0.35
+    )
+
+    /// En route with a partner detail — this is the case the two treatments
+    /// actually differ on.
+    static let instamartEnRoute = Order(
+        id: "fixture-im-en-route",
+        platform: .instamart,
+        context: "Instamart • NOICE Chocolate Nougat Barks, Minimalist Vitamin B5 10% Oil Free Moisturizer",
+        status: "Arrived at location",
+        partnerDetail: "SIDDANNA GOWDA has reached your location",
+        isEnRoute: true,
+        eta: 1,
+        progress: 0.95
+    )
+
+    /// Both stages together, so one preview shows the before/after transition.
+    static let instamartStages: [Order] = [instamartBeforeDispatch, instamartEnRoute]
+
     // MARK: - Named states (drop-in for OrdersState during dev + previews)
 
     /// Four orders across both platforms, exercising short/long status + context.

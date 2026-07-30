@@ -251,19 +251,39 @@ final class MCPClient {
                 arguments: ["orderId": raw.orderId, "lat": 0, "lng": 0]
             )
 
-            // pollingIntervalSeconds == -1 is Swiggy saying "finished, stop
-            // polling". That's an explicit terminal signal — far better than
-            // inferring delivery from an order dropping out of the list.
-            if let secs = tracking?.pollingIntervalSeconds, secs < 0 {
+            // Live ETA — same endpoint shape as Food's get_food_delivery_status
+            // (deliveryBy/serverNow pair + terminal flags + cadence). This is
+            // the ONLY source of a ticking Instamart ETA: get_orders'
+            // `estimatedDeliveryTime` is a static string Swiggy sets once and
+            // never refreshes, and track_order carries no ETA at all.
+            var live: InstamartDeliveryStatus?
+            if let addressId = raw.deliveryAddress?.id {
+                live = try? await callTool(
+                    endpoint: instamartEndpoint,
+                    name: "get_delivery_status",
+                    arguments: ["orderId": raw.orderId, "addressId": addressId]
+                )
+            }
+
+            // Terminal detection, most authoritative first:
+            //   1. get_delivery_status' explicit `delivered` / `cancelled`
+            //   2. track_order's pollingIntervalSeconds == -1 ("stop polling")
+            // Only delivery earns the celebration; a cancel is dropped quietly.
+            if live?.delivered == true || tracking?.pollingIntervalSeconds == -1 {
                 deliveredIds.insert(raw.orderId)
                 continue
             }
-            if let secs = tracking?.pollingIntervalSeconds, secs > 0 {
+            if live?.cancelled == true {
+                continue
+            }
+
+            for candidate in [live?.pollIntervalSec, tracking?.pollingIntervalSeconds] {
+                guard let secs = candidate, secs > 0 else { continue }
                 let asInterval = TimeInterval(secs)
                 minInterval = min(minInterval ?? asInterval, asInterval)
             }
 
-            if let order = Order(instamart: raw, tracking: tracking) {
+            if let order = Order(instamart: raw, tracking: tracking, live: live) {
                 orders.append(order)
             }
         }
@@ -598,6 +618,27 @@ private struct InstamartOrderRaw: Decodable {
     let isActive: Bool
     let storeName: String?
     let items: [InstamartItem]?
+    /// Needed to call `get_delivery_status`, which wants an addressId rather
+    /// than coordinates.
+    let deliveryAddress: InstamartAddress?
+}
+
+private struct InstamartAddress: Decodable {
+    let id: String?
+}
+
+/// Response from Instamart's `get_delivery_status` — the same shape as Food's
+/// `get_food_delivery_status`, and the only place a live Instamart ETA exists.
+/// Verified live 2026-07-27.
+private struct InstamartDeliveryStatus: Decodable {
+    /// Absolute deliver-by time, Swiggy's clock in ms. Null once terminal.
+    let deliveryBy: Int64?
+    /// Swiggy's "now", same clock. Pair with `deliveryBy` instead of using the
+    /// local clock so device drift can't skew the countdown.
+    let serverNow: Int64?
+    let cancelled: Bool?
+    let delivered: Bool?
+    let pollIntervalSec: Int?
 }
 
 private struct InstamartItem: Decodable {
@@ -784,7 +825,11 @@ private extension Order {
     /// `get_orders`' own status fields are deliberately unused for display —
     /// they lag `track_order` by a stage. They stay as the fallback for when
     /// the tracking call fails.
-    init?(instamart raw: InstamartOrderRaw, tracking: InstamartTrackingRaw?) {
+    init?(
+        instamart raw: InstamartOrderRaw,
+        tracking: InstamartTrackingRaw?,
+        live: InstamartDeliveryStatus?
+    ) {
         guard raw.isActive else { return nil }
 
         let store = raw.storeName ?? "Instamart"
@@ -797,44 +842,68 @@ private extension Order {
             ?? raw.statusMessage
             ?? raw.currentStatus
 
-        // Small line: partner detail when Swiggy has one, else what was ordered.
-        let context = tracking?.status?.subStatusMessage ?? itemsContext
-
-        // "13 mins" → 13. Anything unparseable → nil.
-        let eta: Int? = raw.estimatedDeliveryTime
+        // ETA comes from the live deliveryBy/serverNow pair.
+        //
+        // Note the branch on `live != nil` rather than on `liveMinutes != nil`:
+        // once the partner arrives, Swiggy sets `deliveryBy` to null while the
+        // live call still succeeds. That null is authoritative — it means
+        // "there is no time left to report" — so ETA must go nil and let the
+        // badge hide. Coalescing to get_orders' static string here is what
+        // pins a stale "5 mins" next to "Arrived at location".
+        //
+        // The static string is only used when the live call failed outright,
+        // where a frozen number beats no number at all.
+        let liveMinutes: Int? = {
+            guard let by = live?.deliveryBy, let now = live?.serverNow else { return nil }
+            let deltaMs = max(0, by - now)
+            return Int((Double(deltaMs) / 60_000.0).rounded())
+        }()
+        let staticMinutes: Int? = raw.estimatedDeliveryTime
             .flatMap { $0.split(separator: " ").first }
             .flatMap { Int($0) }
+        let eta: Int? = live != nil ? liveMinutes : staticMinutes
 
-        // Progress from the headline's keywords. Ordered most-complete first,
-        // since a delivered order has also been picked up.
-        //
-        // Stepwise rather than ETA-interpolated like Food: Instamart's ETA is
-        // a static string from get_orders, not a live countdown, so there's no
-        // smooth signal to interpolate. ProgressBarView's spring still animates
-        // the jumps between stages.
+        // En route once the order has physically left the store. Keyword-based
+        // because Swiggy gives no structured stage — but it only decides which
+        // secondary line to surface, so a miss is cosmetic.
         let s = headline.lowercased()
-        let progressFraction: Double
-        if s.contains("delivered") {
-            progressFraction = ProgressStage.delivered.fraction
-        } else if s.contains("arrived") || s.contains("reached") || s.contains("nearby")
-                    || s.contains("minutes away") || s.contains("arriving") {
-            progressFraction = ProgressStage.nearby.fraction
-        } else if s.contains("picked up") || s.contains("on the way") || s.contains("out for delivery") {
-            progressFraction = ProgressStage.inTransit.fraction
-        } else if s.contains("packed") {
-            progressFraction = ProgressStage.packed.fraction
-        } else {
-            progressFraction = ProgressStage.placed.fraction
-        }
+        let isEnRoute = s.contains("picked up") || s.contains("on the way")
+            || s.contains("out for delivery") || s.contains("arrived")
+            || s.contains("reached") || s.contains("nearby")
+            || s.contains("minutes away") || s.contains("arriving")
+
+        // Progress now interpolates from the live ETA, same as Food — the
+        // keyword-to-stage guessing this replaced only existed because there
+        // was no ticking ETA to interpolate from.
+        let progressFraction: Double = {
+            if s.contains("delivered") { return 1.0 }
+            if liveMinutes != nil { return Self.instamartProgressFromETA(liveMinutes) }
+            // No live ETA (call failed) — fall back to coarse stage anchors so
+            // the bar still reflects roughly where the order is.
+            if isEnRoute { return ProgressStage.inTransit.fraction }
+            if s.contains("packed") { return ProgressStage.packed.fraction }
+            return ProgressStage.placed.fraction
+        }()
 
         self.init(
             id: raw.orderId,
             platform: .instamart,
-            context: context,
+            context: itemsContext,
             status: headline,
+            partnerDetail: tracking?.status?.subStatusMessage,
+            isEnRoute: isEnRoute,
             eta: eta,
             progress: progressFraction
         )
+    }
+
+    /// Instamart deliveries are much shorter than Food, so the ETA-to-progress
+    /// curve is scaled to a 20-minute ceiling rather than Food's 45.
+    private static func instamartProgressFromETA(_ mins: Int?) -> Double {
+        guard let mins = mins, mins >= 0 else { return 0.20 }
+        let maxETA: Double = 20
+        let raw = 1.0 - min(Double(mins), maxETA) / maxETA
+        return min(0.97, max(0.20, raw))
     }
 }
 
