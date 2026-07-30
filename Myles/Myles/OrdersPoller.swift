@@ -171,7 +171,8 @@ final class OrdersPoller {
             state.setLoaded(
                 result.orders,
                 failedPlatforms: result.failedPlatforms,
-                deliveredOrderIds: result.deliveredOrderIds
+                deliveredOrderIds: result.deliveredOrderIds,
+                cancelledOrderIds: result.cancelledOrderIds
             )
             hasEverPolled = true
             lastPollCompletedAt = Date()

@@ -106,7 +106,8 @@ final class OrdersState {
     func setLoaded(
         _ orders: [Order],
         failedPlatforms: Set<OrderPlatform> = [],
-        deliveredOrderIds: Set<String> = []
+        deliveredOrderIds: Set<String> = [],
+        cancelledOrderIds: Set<String> = []
     ) {
         let now = Date()
         for platform in OrderPlatform.allCases where !failedPlatforms.contains(platform) {
@@ -126,18 +127,36 @@ final class OrdersState {
             merged.append(contentsOf: stale)
         }
 
-        // Celebrate only on positive confirmation from Swiggy. An order simply
-        // vanishing from the list is not enough — it also happens on cancels,
-        // transient empty responses, and (before this guard existed) whenever
-        // one platform errored while the other returned nothing.
+        // Did an order we were tracking actually finish? Two routes:
+        //
+        //  1. Swiggy said so outright — a `delivered` flag or the "stop
+        //     polling" sentinel. Cheapest and most certain.
+        //  2. It quietly dropped out of the active list. This is the common
+        //     case in practice, and it can't be skipped: Swiggy nulls fields
+        //     on terminal responses, so the flags in (1) sometimes never
+        //     arrive. The guards are what make it safe —
+        //       • its platform must have answered successfully this cycle,
+        //         otherwise "gone" only means "we couldn't ask"
+        //       • it must not be a known cancellation, which also vanishes
+        //         but is the opposite of good news
+        let survivingIds = Set(merged.map(\.id))
+        let quietlyFinished = lastKnownOrders.contains { prev in
+            !survivingIds.contains(prev.id)
+                && !failedPlatforms.contains(prev.platform)
+                && !cancelledOrderIds.contains(prev.id)
+        }
         let confirmedFinish = deliveredOrderIds.contains { previousOrderIds.contains($0) }
+
         if !merged.isEmpty {
             endCelebration()          // a live order always outranks the celebration
-        } else if confirmedFinish {
+        } else if (confirmedFinish || quietlyFinished) && !isCelebrating {
+            // The `!isCelebrating` guard matters: Swiggy can keep reporting the
+            // same order as delivered across consecutive polls, and without it
+            // each report would restart the 60s window.
             beginCelebration()
         }
 
-        previousOrderIds = Set(merged.map(\.id)).union(deliveredOrderIds)
+        previousOrderIds = survivingIds.union(deliveredOrderIds)
         lastKnownOrders = merged
 
         status = merged.isEmpty ? .empty : .loaded(merged)

@@ -13,15 +13,15 @@ import SwiftUI
 struct OrderRowView: View {
     let order: Order
 
-    /// Hide the ETA badge when Swiggy explicitly stops estimating — that
-    /// happens once the partner is standing at the user's door and the
-    /// remaining time is meaningless. Detected via keyword match on the
-    /// status text (Swiggy sends "Arrived at location") combined with a
-    /// nil ETA, so a nil ETA from a mid-flight state (e.g. transient
-    /// delivery-status fetch failure) still shows the badge with "—".
+    /// Hide the ETA badge once there's no meaningful time left to show.
+    ///
+    /// Swiggy nulls the deliver-by time when the partner reaches the door, so
+    /// an en-route order with no ETA has genuinely arrived — a badge there
+    /// would read as a broken tracker. A missing ETA *before* dispatch is a
+    /// different thing: that's us not knowing yet, which "—" states honestly.
     /// When hidden, the left column expands to fill the row.
     private var showsETABadge: Bool {
-        !(order.eta == nil && order.status.lowercased().contains("arrived"))
+        !(order.eta == nil && order.isEnRoute)
     }
 
     var body: some View {

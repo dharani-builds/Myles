@@ -54,10 +54,16 @@ final class MCPClient {
         /// last-known orders and to suppress the celebration.
         let failedPlatforms: Set<OrderPlatform>
         /// Order IDs that Swiggy explicitly told us are complete this cycle
-        /// (Instamart `pollingIntervalSeconds == -1`, Food `delivered == true`).
-        /// Positive evidence of delivery, as opposed to an order merely
-        /// disappearing from the active list.
+        /// (Instamart `pollingIntervalSeconds == -1` or `delivered`, Food
+        /// `delivered == true`). Positive evidence, but not the only route —
+        /// an order can also finish by dropping out of the active list between
+        /// two successful polls, which `OrdersState` also treats as delivery.
         let deliveredOrderIds: Set<String>
+        /// Order IDs Swiggy reported cancelled. Tracked separately because a
+        /// cancelled order also disappears from the list, and must NOT be
+        /// mistaken for a delivery — nobody wants a celebration for an order
+        /// that isn't coming.
+        let cancelledOrderIds: Set<String>
     }
 
     /// Fetch every active order across Food + Instamart, in parallel, with
@@ -110,7 +116,8 @@ final class MCPClient {
             orders: (foodOutcome?.orders ?? []) + (instaOutcome?.orders ?? []),
             suggestedPollInterval: intervals.min(),
             failedPlatforms: failed,
-            deliveredOrderIds: (foodOutcome?.deliveredIds ?? []).union(instaOutcome?.deliveredIds ?? [])
+            deliveredOrderIds: (foodOutcome?.deliveredIds ?? []).union(instaOutcome?.deliveredIds ?? []),
+            cancelledOrderIds: (foodOutcome?.cancelledIds ?? []).union(instaOutcome?.cancelledIds ?? [])
         )
     }
 
@@ -124,15 +131,18 @@ final class MCPClient {
         let minPollInterval: TimeInterval?
         /// Orders Swiggy flagged `delivered` this cycle.
         let deliveredIds: Set<String>
+        /// Orders Swiggy flagged `cancelled` this cycle.
+        let cancelledIds: Set<String>
     }
 
     private struct InstamartFetchOutcome {
         let orders: [Order]
         /// Lowest `pollingIntervalSeconds` across active Instamart orders.
         let minPollInterval: TimeInterval?
-        /// Orders where `track_order` returned `pollingIntervalSeconds == -1`,
-        /// Swiggy's "this order is finished, stop polling" signal.
+        /// Orders reported delivered, or where `track_order` returned
+        /// `pollingIntervalSeconds == -1` (Swiggy's "finished, stop polling").
         let deliveredIds: Set<String>
+        let cancelledIds: Set<String>
     }
 
     /// A permissive decodable used ONLY for capture-only side-calls where we
@@ -161,14 +171,19 @@ final class MCPClient {
         // carry fields (final orderDeliveryStatus, terminal timestamps, etc.)
         // that the active-only view drops. Result discarded — capture lands
         // in the JSONL via callTool's built-in append.
-        let _: CaptureOnlyResult? = try? await callTool(
-            endpoint: foodEndpoint,
-            name: "get_food_orders",
-            arguments: [
-                "addressId": addressId,
-                "activeOnly": false
-            ]
-        )
+        // Skipped entirely unless capture is on — see MCPCaptureLog.isEnabled.
+        // Fetching a response only to throw it away would add latency to every
+        // poll and put load on Swiggy's API for no user-visible benefit.
+        if MCPCaptureLog.shared.isEnabled {
+            let _: CaptureOnlyResult? = try? await callTool(
+                endpoint: foodEndpoint,
+                name: "get_food_orders",
+                arguments: [
+                    "addressId": addressId,
+                    "activeOnly": false
+                ]
+            )
+        }
 
         // For each active order, try to fetch live delivery status. Individual
         // failures are tolerated: the order still appears, just without ETA
@@ -177,6 +192,7 @@ final class MCPClient {
         var orders: [Order] = []
         var minInterval: TimeInterval?
         var deliveredIds: Set<String> = []
+        var cancelledIds: Set<String> = []
         for raw in rawOrders {
             let status: FoodDeliveryStatus? = try? await fetchFoodDeliveryStatus(orderId: raw.orderId)
 
@@ -189,22 +205,31 @@ final class MCPClient {
                 arguments: ["orderId": raw.orderId]
             )
 
-            // Capture-only — data we're logging but not consuming yet.
-            let _: CaptureOnlyResult? = try? await callTool(
-                endpoint: foodEndpoint,
-                name: "get_food_order_details",
-                arguments: ["orderId": raw.orderId]
-            )
+            // Capture-only — logged for future analysis, not consumed. Skipped
+            // when capture is off so we're not calling Swiggy per-order,
+            // per-poll for a response nothing reads.
+            if MCPCaptureLog.shared.isEnabled {
+                let _: CaptureOnlyResult? = try? await callTool(
+                    endpoint: foodEndpoint,
+                    name: "get_food_order_details",
+                    arguments: ["orderId": raw.orderId]
+                )
+            }
 
             // Terminal flags win over `isActiveOrder` from the list —
-            // `get_food_delivery_status` is more current. Only `delivered`
-            // counts as a celebration-worthy finish; a cancelled order is
-            // dropped silently.
-            if status?.delivered == true {
+            // `get_food_delivery_status` is more current. Falls back to the
+            // list's own status strings, which matter when the live call
+            // fails: without them a delivery at that exact moment would go
+            // unrecorded.
+            let listSaysDelivered = (raw.orderStatus.lowercased() == "delivered")
+                || (raw.orderDeliveryStatus?.lowercased() == "delivered")
+            if status?.delivered == true || listSaysDelivered {
                 deliveredIds.insert(raw.orderId)
                 continue
             }
-            if status?.cancelled == true {
+            if status?.cancelled == true
+                || raw.orderDeliveryStatus?.lowercased().contains("cancel") == true {
+                cancelledIds.insert(raw.orderId)
                 continue
             }
             if let order = Order(food: raw, status: status, trackText: trackText) {
@@ -218,7 +243,8 @@ final class MCPClient {
         return FoodFetchOutcome(
             orders: orders,
             minPollInterval: minInterval,
-            deliveredIds: deliveredIds
+            deliveredIds: deliveredIds,
+            cancelledIds: cancelledIds
         )
     }
 
@@ -243,8 +269,9 @@ final class MCPClient {
         var orders: [Order] = []
         var minInterval: TimeInterval?
         var deliveredIds: Set<String> = []
+        var cancelledIds: Set<String> = []
 
-        for raw in result.orders where raw.isActive {
+        for raw in (result.orders ?? []) where raw.isActive != false {
             let tracking: InstamartTrackingRaw? = try? await callTool(
                 endpoint: instamartEndpoint,
                 name: "track_order",
@@ -269,11 +296,16 @@ final class MCPClient {
             //   1. get_delivery_status' explicit `delivered` / `cancelled`
             //   2. track_order's pollingIntervalSeconds == -1 ("stop polling")
             // Only delivery earns the celebration; a cancel is dropped quietly.
-            if live?.delivered == true || tracking?.pollingIntervalSeconds == -1 {
+            let headlineSaysDelivered = tracking?.status?.statusMessage?
+                .lowercased().contains("delivered") == true
+            if live?.delivered == true
+                || tracking?.pollingIntervalSeconds == -1
+                || headlineSaysDelivered {
                 deliveredIds.insert(raw.orderId)
                 continue
             }
             if live?.cancelled == true {
+                cancelledIds.insert(raw.orderId)
                 continue
             }
 
@@ -291,7 +323,8 @@ final class MCPClient {
         return InstamartFetchOutcome(
             orders: orders,
             minPollInterval: minInterval,
-            deliveredIds: deliveredIds
+            deliveredIds: deliveredIds,
+            cancelledIds: cancelledIds
         )
     }
 
@@ -597,25 +630,43 @@ private struct FoodOrderRaw: Decodable {
 /// Using this pair (instead of the local clock) means we're immune to device
 /// clock drift.
 private struct FoodDeliveryStatus: Decodable {
-    let orderId: String
-    let deliveryBy: Int64
-    let serverNow: Int64
-    let etaText: String?      // Human copy, e.g. "2 mins". May be nil close to arrival.
-    let cancelled: Bool
-    let delivered: Bool
+    let orderId: String?
+    /// Absolute deliver-by time, Swiggy's clock in ms.
+    ///
+    /// OPTIONAL ON PURPOSE. Swiggy nulls this the moment there's no time left
+    /// to report — confirmed on the Instamart twin of this endpoint, which
+    /// returned `"deliveryBy": null` alongside `"delivered": true`. When this
+    /// was `Int64` the whole response failed to decode at exactly that moment,
+    /// `try?` swallowed it, and the terminal flags below were never seen — so
+    /// delivery went undetected right when it mattered.
+    let deliveryBy: Int64?
+    /// Swiggy's "now", same clock. Paired with `deliveryBy` instead of the
+    /// local clock so device drift can't skew the countdown.
+    let serverNow: Int64?
+    let etaText: String?      // Human copy, e.g. "2 mins". Nil close to arrival.
+    /// Optional for the same reason as `deliveryBy` — one missing field must
+    /// not cost us the whole payload.
+    let cancelled: Bool?
+    let delivered: Bool?
     let pollIntervalSec: Int?
 }
 
 private struct InstamartOrdersResult: Decodable {
-    let orders: [InstamartOrderRaw]
+    /// Optional to match Food's equivalent — an omitted or null `orders` key
+    /// on a no-active-orders response must read as "none", not as a decode
+    /// failure. A throw here marks the whole platform failed, which now pulls
+    /// stale orders forward for five minutes.
+    let orders: [InstamartOrderRaw]?
 }
 
 private struct InstamartOrderRaw: Decodable {
     let orderId: String
-    let currentStatus: String                    // e.g. "Order picked up"
+    /// Optional now that `track_order`'s status supersedes it for display —
+    /// this is only a fallback, and shouldn't be able to fail the decode.
+    let currentStatus: String?                   // e.g. "Order picked up"
     let statusMessage: String?                   // e.g. "DAVAL SAB has picked up your order"
     let estimatedDeliveryTime: String?           // e.g. "13 mins"
-    let isActive: Bool
+    let isActive: Bool?
     let storeName: String?
     let items: [InstamartItem]?
     /// Needed to call `get_delivery_status`, which wants an addressId rather
@@ -720,11 +771,15 @@ private extension Order {
         // The 0.97 ceiling leaves room to show a distinct 100% at delivery.
         // 45 minutes as `maxETA` matches Swiggy's typical order upper bound;
         // longer orders clamp to the 20% floor until they drop below 45min.
+        // Nil once Swiggy stops reporting a deliver-by time (arrival, or any
+        // terminal state) — which is exactly when the ETA badge should vanish
+        // rather than sit on a stale number.
         let statusLabel: String
-        let remainingMinutes: Int? = status.map {
-            let deltaMs = max(0, $0.deliveryBy - $0.serverNow)
+        let remainingMinutes: Int? = {
+            guard let by = status?.deliveryBy, let now = status?.serverNow else { return nil }
+            let deltaMs = max(0, by - now)
             return Int((Double(deltaMs) / 60_000.0).rounded())
-        }
+        }()
 
         // Swiggy's own conversational phrase (if we got it) beats any label
         // we might invent — it's the same copy shown in the iOS Live Activity.
@@ -757,14 +812,33 @@ private extension Order {
             statusLabel = swiggyPhrase ?? "Order received"
         }
 
+        // Food's MCP gives no partner detail, so this doesn't affect which
+        // secondary line shows — but it does let the row hide a meaningless
+        // ETA badge on arrival, the same way Instamart does.
+        let isEnRoute = Order.phraseImpliesEnRoute(statusLabel)
+
         self.init(
             id: raw.orderId,
             platform: .food,
             context: "\(raw.restaurantName) • \(itemsLabel)",
             status: statusLabel,
+            partnerDetail: nil,
+            isEnRoute: isEnRoute,
             eta: remainingMinutes,
             progress: progressFraction
         )
+    }
+
+    /// Shared keyword test for "the order has left the store". Swiggy exposes
+    /// no structured stage on either platform, so this reads the status phrase.
+    /// Only affects presentation (which secondary line shows, whether the ETA
+    /// badge is meaningful), so a miss is cosmetic rather than incorrect.
+    fileprivate static func phraseImpliesEnRoute(_ phrase: String) -> Bool {
+        let s = phrase.lowercased()
+        return s.contains("picked up") || s.contains("on the way")
+            || s.contains("out for delivery") || s.contains("arrived")
+            || s.contains("reached") || s.contains("nearby")
+            || s.contains("minutes away") || s.contains("arriving")
     }
 
     /// Continuous ETA-to-progress mapping. See init?(food:status:) for the
@@ -830,7 +904,10 @@ private extension Order {
         tracking: InstamartTrackingRaw?,
         live: InstamartDeliveryStatus?
     ) {
-        guard raw.isActive else { return nil }
+        // Treat a missing `isActive` as active — the caller only passes rows
+        // from an activeOnly query, so absence means "field not sent", not
+        // "not active".
+        guard raw.isActive != false else { return nil }
 
         let store = raw.storeName ?? "Instamart"
         let itemNames = (raw.items ?? []).map { $0.name }
@@ -838,9 +915,12 @@ private extension Order {
         let itemsContext = itemsLabel.isEmpty ? store : "\(store) • \(itemsLabel)"
 
         // Headline: live tracking first, then get_orders' laggier fields.
+        // Final fallback covers the case where every status field is missing —
+        // better a generic line than dropping an order the user placed.
         let headline = tracking?.status?.statusMessage
             ?? raw.statusMessage
             ?? raw.currentStatus
+            ?? "Order in progress"
 
         // ETA comes from the live deliveryBy/serverNow pair.
         //
@@ -863,14 +943,8 @@ private extension Order {
             .flatMap { Int($0) }
         let eta: Int? = live != nil ? liveMinutes : staticMinutes
 
-        // En route once the order has physically left the store. Keyword-based
-        // because Swiggy gives no structured stage — but it only decides which
-        // secondary line to surface, so a miss is cosmetic.
         let s = headline.lowercased()
-        let isEnRoute = s.contains("picked up") || s.contains("on the way")
-            || s.contains("out for delivery") || s.contains("arrived")
-            || s.contains("reached") || s.contains("nearby")
-            || s.contains("minutes away") || s.contains("arriving")
+        let isEnRoute = Order.phraseImpliesEnRoute(headline)
 
         // Progress now interpolates from the live ETA, same as Food — the
         // keyword-to-stage guessing this replaced only existed because there
@@ -946,7 +1020,12 @@ private final class MCPCaptureLog: @unchecked Sendable {
     private static let retentionDays = 7
 
     /// Whether to write anything at all. Resolved once at init.
-    private let isEnabled: Bool
+    ///
+    /// Readable by `MCPClient` so it can also skip the capture-only tool calls
+    /// when logging is off — otherwise we'd be fetching responses purely to
+    /// discard them, which is both wasted latency and needless load on
+    /// Swiggy's API.
+    let isEnabled: Bool
 
     private let baseDir: URL?
     private let queue = DispatchQueue(label: "com.dharani.Myles.MCPCaptureLog")

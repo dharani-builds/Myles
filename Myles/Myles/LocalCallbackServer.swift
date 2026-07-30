@@ -88,23 +88,31 @@ final class LocalCallbackServer: @unchecked Sendable {
     private func handle(connection: NWConnection) {
         connection.start(queue: .global(qos: .userInitiated))
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, _, _ in
-            defer { connection.cancel() }
-
+            // NOTE: no `defer { connection.cancel() }` here. `send` is async,
+            // so cancelling on closure exit tears the socket down before the
+            // bytes flush and the browser shows a connection reset instead of
+            // the page. Every path below cancels from the send completion.
             guard let self,
                   let data,
-                  let request = String(data: data, encoding: .utf8) else { return }
+                  let request = String(data: data, encoding: .utf8) else {
+                connection.cancel()
+                return
+            }
 
             // Parse the request line: "GET /callback?code=xxx&state=yyy HTTP/1.1"
             let firstLine = request.components(separatedBy: "\r\n").first ?? ""
             let parts = firstLine.components(separatedBy: " ")
-            guard parts.count >= 2, parts[0] == "GET" else { return }
+            guard parts.count >= 2, parts[0] == "GET" else {
+                connection.cancel()
+                return
+            }
             let path = parts[1]
 
             // Ignore incidental requests (favicon.ico, etc.) — respond with 404 politely
             guard path.hasPrefix("/callback") else {
                 let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                 connection.send(content: response.data(using: .utf8),
-                                completion: .contentProcessed { _ in })
+                                completion: .contentProcessed { _ in connection.cancel() })
                 return
             }
 
@@ -120,12 +128,17 @@ final class LocalCallbackServer: @unchecked Sendable {
             </html>
             """
             let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(html.utf8.count)\r\nConnection: close\r\n\r\n\(html)"
-            connection.send(content: response.data(using: .utf8),
-                            completion: .contentProcessed { _ in })
-
-            // Return the full URL to the caller
             let callbackURL = URL(string: "http://127.0.0.1:\(Self.port)\(path)")!
-            self.resumeCallback(with: .success(callbackURL))
+
+            // Resume only once the page has actually been written. Resuming
+            // first would let `resumeCallback` → `stop()` cancel the listener
+            // out from under the in-flight send, which is how the user ends up
+            // signed in but staring at a browser error.
+            connection.send(content: response.data(using: .utf8),
+                            completion: .contentProcessed { [weak self] _ in
+                                connection.cancel()
+                                self?.resumeCallback(with: .success(callbackURL))
+                            })
         }
     }
 
