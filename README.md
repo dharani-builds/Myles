@@ -17,11 +17,10 @@ That gap between "I want a glance" and "I have to do five steps for a glance" wa
 
 ## What it does
 
-- Shows active Food and Instamart orders together
-- Live ETA that counts down
-- Swiggy's own status text — "Partner is on the way", "Out for delivery", "Arrived at location"
-- A progress bar that moves smoothly instead of jumping between stages
-- Says "No active orders" and stays out of the way the rest of the time
+- Shows every active order — Food or Instamart — together in one place
+- ETA counts down in real time
+- Status line matches what Swiggy shows on your phone: "Partner is on the way," "Out for delivery," "Arrived at location"
+- Stays quiet when there's nothing to track
 
 ## How it works
 
