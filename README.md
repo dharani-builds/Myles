@@ -49,7 +49,7 @@ The last piece is the one I like most. If the app has been idle for a while and 
 
 ## Status
 
-Working and in daily use on my own machine. Food is tested end to end against real orders; Instamart works but has had less mileage.
+Working and in daily use on my own machine.
 
 Not distributed yet — Swiggy's Builders program is currently scoped to local development, so a public release is a conversation to have with them first, not something to just do.
 
